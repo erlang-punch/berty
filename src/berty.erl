@@ -10,14 +10,19 @@
 -module(berty).
 -export([decode/1, decode/2]).
 -export([encode/1, encode/2]).
+-compile(export_all).
 -include_lib("kernel/include/logger.hrl").
+-include_lib("proper/include/proper.hrl").
+-include_lib("eunit/include/eunit.hrl").
 -record(state, { header = ""
+               , version = 1
                , compressed = false
                , data = []
                }).
 
 %%--------------------------------------------------------------------
 %% @doc 
+%% @see decode/2
 %% @end
 %%--------------------------------------------------------------------
 -spec decode(Binary) -> Return when
@@ -39,6 +44,14 @@ decode(Data) ->
 decode(Data, Opts) ->
     decode_header(Data, Opts, #state{}).
 
+decode_test() ->
+    [?assertEqual({ok, 1}, decode(term_to_binary(1)))
+    ,?assertEqual({ok, 2}, decode(term_to_binary(2)))
+    ,?assertEqual({ok, -1}, decode(term_to_binary(-1)))
+    ,proper:quickcheck(decode_integer_ext_properties())
+    ,proper:quickcheck(decode_small_integer_ext_properties())
+    ].
+
 %%--------------------------------------------------------------------
 %% @hidden
 %% @doc 
@@ -52,7 +65,6 @@ decode(Data, Opts) ->
 
 decode_header(<<131, Rest/binary>>, Opts, Buffer) ->
     decode_terms(Rest, Opts, Buffer).
-
 
 %%--------------------------------------------------------------------
 %% @hidden
@@ -94,7 +106,9 @@ decode_terms(<<119, Rest/binary>>, Opts, Buffer) ->
 decode_terms(<<100, Rest/binary>>, Opts, Buffer) ->
     {ok, Atom, Rest2} = decode_atom_ext(Rest, Opts),
     NewAtom = decode_atoms(Atom, Opts),
-    decode_terms(Rest2, Opts, Buffer#state{ data = NewAtom }).
+    decode_terms(Rest2, Opts, Buffer#state{ data = NewAtom });
+decode_terms(<<Code, _/binary>>, Opts, Buffer) ->
+    {error, {unsupported, Code}}.
 
 %%--------------------------------------------------------------------
 %% @hidden 
@@ -172,10 +186,13 @@ decode_terms(<<100, Rest/binary>>, Opts, Buffer) ->
       Limit :: float(),
       Return :: binary() | string() | atom().
 
+% @TODO add utf8 support for atoms
 decode_atoms(Binary, #{ atoms := create }) ->
     erlang:binary_to_atom(Binary);
 decode_atoms(Binary, #{ atoms := {create, Limit} }) 
-  when is_float(Limit) andalso Limit >= 0 andalso Limit =< 1 ->
+  when is_float(Limit) andalso 
+       Limit >= 0 andalso
+       Limit =< 1 ->
     case erlang:system_info(atom_count)/erlang:system_info(atom_limit) of
         X when X >= Limit -> Binary;
         _ -> erlang:binary_to_atom(Binary)
@@ -201,6 +218,8 @@ decode_atoms(Binary, _) ->
 %%--------------------------------------------------------------------
 %% @hidden
 %% @doc
+%%
+%% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist.html#small_integer_ext
 %% @end
 %%--------------------------------------------------------------------
 -spec decode_small_integer_ext(Binary, Opts) -> Return when
@@ -211,9 +230,19 @@ decode_atoms(Binary, _) ->
 decode_small_integer_ext(<<Integer, Rest/binary>>, _Opts) ->
     {ok, Integer, Rest}.
 
+decode_small_integer_ext_properties() ->
+    Fun = fun(Binary) -> 
+                  <<Expected/integer, _/binary>> = Binary,
+                  {ok, Result, _} = decode_small_integer_ext(Binary, #{}),
+                  Result =:= Expected
+          end,
+    ?FORALL(Binary, binary(4), Fun(Binary)).
+
 %%--------------------------------------------------------------------
 %% @hidden
 %% @doc
+%%
+%% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist.html#integer_ext
 %% @end
 %%--------------------------------------------------------------------
 -spec decode_integer_ext(Binary, Opts) -> Return when
@@ -221,8 +250,16 @@ decode_small_integer_ext(<<Integer, Rest/binary>>, _Opts) ->
       Opts :: map(),
       Return :: {ok, integer(), binary()}.
 
-decode_integer_ext(<<Integer:32, Rest/binary>>, _Opts) ->
+decode_integer_ext(<<Integer:32/signed-integer, Rest/binary>>, _Opts) ->
     {ok, Integer, Rest}.
+
+decode_integer_ext_properties() ->
+    Fun = fun(Binary) ->
+                  <<Expected:32/integer, _/binary>> = Binary,
+                  {ok, Result, _} = decode_integer_ext(Binary, #{}),
+                  Expected =:= Result
+          end,
+    ?FORALL(Binary, binary(4), Fun(Binary)).
 
 %%--------------------------------------------------------------------
 %% @hidden
@@ -240,15 +277,17 @@ decode_float_ext(<<Float:31/binary, Rest/binary>>, _Opts) ->
 %%--------------------------------------------------------------------
 %% @hidden
 %% @doc
+%%
+%% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#new_float_ext
 %% @end
 %%--------------------------------------------------------------------
--spec decode_new_float_ext(Binary, Opts) -> Return when
-      Binary :: binary(),
-      Opts :: map(),
-      Return :: {ok, float(), binary()}.
-
-decode_new_float_ext(<<70, Float:8/binary, Rest/binary>>, _Opts) ->
-    {ok, Float, Rest}.
+%% -spec decode_new_float_ext(Binary, Opts) -> Return when
+%%       Binary :: binary(),
+%%       Opts :: map(),
+%%       Return :: {ok, float(), binary()}.
+%%
+%% decode_new_float_ext(<<70, Float:8/binary, Rest/binary>>, _Opts) ->
+%%     {error, not_supported}.
 
 %%--------------------------------------------------------------------
 %% @hidden
@@ -261,9 +300,10 @@ decode_new_float_ext(<<70, Float:8/binary, Rest/binary>>, _Opts) ->
       Return :: {ok, Atom, binary()},
       Atom :: atom() | string() | binary().
 
-decode_atom_utf8_ext(<<Length:16/unsigned-integer, Rest/binary>>, _Opts) ->
+decode_atom_utf8_ext(<<Length:16/unsigned-integer, Rest/binary>>, Opts) ->
     <<Atom:Length/binary, Rest2/binary>> = Rest,
-    {ok, Atom, Rest}.
+    NewAtom = decode_atoms(Atom, Opts),
+    {ok, NewAtom, Rest}.
 
 %%--------------------------------------------------------------------
 %% @hidden
@@ -276,9 +316,10 @@ decode_atom_utf8_ext(<<Length:16/unsigned-integer, Rest/binary>>, _Opts) ->
       Return :: {ok, Atom, binary()},
       Atom :: atom() | string() | binary().
 
-decode_small_atom_utf8_ext(<<119, Length/unsigned-integer, Rest/binary>>, Opts) ->    
+decode_small_atom_utf8_ext(<<Length/unsigned-integer, Rest/binary>>, Opts) ->    
     <<Atom:Length/binary, Rest2/binary>> = Rest,
-    {ok, Atom, Rest}.
+    NewAtom = decode_atoms(Atom, Opts),
+    {ok, NewAtom, Rest}.
 
 %%--------------------------------------------------------------------
 %% @hidden
@@ -293,7 +334,8 @@ decode_small_atom_utf8_ext(<<119, Length/unsigned-integer, Rest/binary>>, Opts) 
 
 decode_atom_ext(<<Length:16/unsigned-integer, Rest/binary>>, Opts) ->
     <<Atom:Length/binary, Rest2/binary>> = Rest,
-    {ok, Atom, Rest2}.
+    NewAtom = decode_atoms(Atom, Opts),
+    {ok, NewAtom, Rest2}.
 
 %%--------------------------------------------------------------------
 %% @hidden
@@ -308,7 +350,8 @@ decode_atom_ext(<<Length:16/unsigned-integer, Rest/binary>>, Opts) ->
 
 decode_small_atom_ext(<<115, Length:8/unsigned-integer, Rest/binary>>, Opts) ->
     <<Atom:Length, Rest2/binary>> = Rest,
-    {ok, Atom, Rest}.
+    NewAtom = decode_atoms(Atom, Opts),
+    {ok, NewAtom, Rest}.
 
 %%--------------------------------------------------------------------
 %% @hidden
