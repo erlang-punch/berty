@@ -3,7 +3,6 @@
 A clean, safe and flexible implementation of BERT, a data-structure
 format inspired by Erlang ETF.
 
-
 ## Build
 
     $ rebar3 compile

@@ -21,7 +21,7 @@
                }).
 
 %%--------------------------------------------------------------------
-%% @doc 
+%% @doc
 %% @see decode/2
 %% @end
 %%--------------------------------------------------------------------
@@ -33,14 +33,14 @@ decode(Data) ->
     decode(Data, #{}).
 
 %%--------------------------------------------------------------------
-%% @doc 
+%% @doc
 %% @end
 %%--------------------------------------------------------------------
 -spec decode(Binary, Opts) -> Return when
       Binary :: binary(),
       Opts :: map(),
       Return :: {ok, term()}.
-    
+
 decode(Data, Opts) ->
     decode_header(Data, Opts, #state{}).
 
@@ -54,7 +54,7 @@ decode_test() ->
 
 %%--------------------------------------------------------------------
 %% @hidden
-%% @doc 
+%% @doc
 %% @end
 %%--------------------------------------------------------------------
 -spec decode_header(Binary, Opts, Buffer) -> Return when
@@ -68,7 +68,7 @@ decode_header(<<131, Rest/binary>>, Opts, Buffer) ->
 
 %%--------------------------------------------------------------------
 %% @hidden
-%% @doc 
+%% @doc
 %% @end
 %%--------------------------------------------------------------------
 -spec decode_terms(Binary, Opts, Buffer) -> Return when
@@ -79,7 +79,7 @@ decode_header(<<131, Rest/binary>>, Opts, Buffer) ->
 
 decode_terms(<<>>, _Opts, #state{ data = Data} = _Buffer) ->
     {ok, Data};
-decode_terms(_, _Opts, #state{ data = Data } = _Buffer ) 
+decode_terms(_, _Opts, #state{ data = Data } = _Buffer )
   when is_number(Data) orelse is_atom(Data) ->
     {ok, Data};
 % nil
@@ -111,7 +111,7 @@ decode_terms(<<Code, _/binary>>, Opts, Buffer) ->
     {error, {unsupported, Code}}.
 
 %%--------------------------------------------------------------------
-%% @hidden 
+%% @hidden
 %%
 %% @doc atoms are a big problem for BERT and ETF, even more if the
 %% application is communicating with unknown devices. This function
@@ -170,7 +170,7 @@ decode_terms(<<Code, _/binary>>, Opts, Buffer) ->
 %% ```
 %% berty:decode(<<131,100,0,2,111,107>>, #{ atoms => as_string }).
 %% {ok, "ok"}
-%% ''' 
+%% '''
 %%
 %% @end
 %%--------------------------------------------------------------------
@@ -189,18 +189,18 @@ decode_terms(<<Code, _/binary>>, Opts, Buffer) ->
 % @TODO add utf8 support for atoms
 decode_atoms(Binary, #{ atoms := create }) ->
     erlang:binary_to_atom(Binary);
-decode_atoms(Binary, #{ atoms := {create, Limit} }) 
-  when is_float(Limit) andalso 
+decode_atoms(Binary, #{ atoms := {create, Limit} })
+  when is_float(Limit) andalso
        Limit >= 0 andalso
        Limit =< 1 ->
     case erlang:system_info(atom_count)/erlang:system_info(atom_limit) of
         X when X >= Limit -> Binary;
         _ -> erlang:binary_to_atom(Binary)
     end;
-decode_atoms(Binary, #{ atoms := {create, Limit, warning} }) 
+decode_atoms(Binary, #{ atoms := {create, Limit, warning} })
   when is_float(Limit) andalso Limit >= 0 andalso Limit =< 1 ->
     case erlang:system_info(atom_count)/erlang:system_info(atom_limit) of
-        X when X >= Limit -> 
+        X when X >= Limit ->
             ?LOG_WARNING("Atom limits ~p exceed (~p)", [Limit, X]),
             Binary;
         _ -> erlang:binary_to_atom(Binary)
@@ -231,7 +231,7 @@ decode_small_integer_ext(<<Integer, Rest/binary>>, _Opts) ->
     {ok, Integer, Rest}.
 
 decode_small_integer_ext_properties() ->
-    Fun = fun(Binary) -> 
+    Fun = fun(Binary) ->
                   <<Expected/integer, _/binary>> = Binary,
                   {ok, Result, _} = decode_small_integer_ext(Binary, #{}),
                   Result =:= Expected
@@ -316,7 +316,7 @@ decode_atom_utf8_ext(<<Length:16/unsigned-integer, Rest/binary>>, Opts) ->
       Return :: {ok, Atom, binary()},
       Atom :: atom() | string() | binary().
 
-decode_small_atom_utf8_ext(<<Length/unsigned-integer, Rest/binary>>, Opts) ->    
+decode_small_atom_utf8_ext(<<Length/unsigned-integer, Rest/binary>>, Opts) ->
     <<Atom:Length/binary, Rest2/binary>> = Rest,
     NewAtom = decode_atoms(Atom, Opts),
     {ok, NewAtom, Rest}.
