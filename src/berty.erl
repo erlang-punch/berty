@@ -82,9 +82,16 @@ decode_terms(<<>>, _Opts, #state{ data = Data} = _Buffer) ->
 decode_terms(_, _Opts, #state{ data = Data } = _Buffer )
   when is_number(Data) orelse is_atom(Data) ->
     {ok, Data};
-% nil
+
+%---------------------------------------------------------------------
+% nil support
+%---------------------------------------------------------------------
 decode_terms(<<106, Rest/binary>>, Opts, Buffer) ->
     decode_terms(Rest, Opts, Buffer#state{ data = nil });
+
+%---------------------------------------------------------------------
+% integers support
+%---------------------------------------------------------------------
 % small_integer_ext
 decode_terms(<<97, Rest/binary>>, Opts, Buffer) ->
     {ok, Integer, Rest2} = decode_small_integer_ext(Rest, Opts),
@@ -93,21 +100,41 @@ decode_terms(<<97, Rest/binary>>, Opts, Buffer) ->
 decode_terms(<<98, Rest/binary>>, Opts, Buffer) ->
     {ok, Integer, Rest2} = decode_integer_ext(Rest, Opts),
     decode_terms(Rest2, Opts, Buffer#state{ data = Integer});
+
+%---------------------------------------------------------------------
+% floats support
+%---------------------------------------------------------------------
 % float_ext
-decode_terms(<<99, Rest/binary>>, Opts, Buffer) ->
+decode_terms(<<99, Rest/binary>>, #{ minor_version := 0 } = Opts, Buffer) ->
     {ok, Float, Rest2} = decode_float_ext(Rest, Opts),
     decode_terms(Rest2, Opts, Buffer#state{ data = Float });
-% atom_utf8_ext
-decode_terms(<<119, Rest/binary>>, Opts, Buffer) ->
-    {ok, Atom, Rest2} = decode_atom_utf8_ext(Rest, Opts),
-    NewAtom = decode_atoms(Atom, Opts),
-    decode_terms(Rest2, Opts, Buffer#state{ data = NewAtom });
+
+%---------------------------------------------------------------------
+% atoms support
+%---------------------------------------------------------------------
 % atom_ext
 decode_terms(<<100, Rest/binary>>, Opts, Buffer) ->
+    ?LOG_WARNING("ATOM_EXT is deprecated", []),
     {ok, Atom, Rest2} = decode_atom_ext(Rest, Opts),
-    NewAtom = decode_atoms(Atom, Opts),
-    decode_terms(Rest2, Opts, Buffer#state{ data = NewAtom });
-decode_terms(<<Code, _/binary>>, Opts, Buffer) ->
+    decode_terms(Rest2, Opts, Buffer#state{ data = Atom });
+% small_atom_ext
+decode_terms(<<115, Rest/binary>>, Opts, Buffer) ->
+    ?LOG_WARNING("SMALL_ATOM_EXT is deprecated", []),
+    {ok, Atom, Rest2} = decode_small_atom_ext(Rest, Opts),
+    decode_terms(Rest2, Opts, Buffer#state{ data = Atom });
+% atom_utf8_ext
+decode_terms(<<118, Rest/binary>>, Opts, Buffer) ->
+    {ok, Atom, Rest2} = decode_atom_utf8_ext(Rest, Opts),
+    decode_terms(Rest2, Opts, Buffer#state{ data = Atom });
+% small_atom_utf8_ext
+decode_terms(<<119, Rest/binary>>, Opts, Buffer) ->
+    {ok, Atom, Rest2} = decode_small_atom_utf8_ext(Rest, Opts),
+    decode_terms(Rest2, Opts, Buffer#state{ data = Atom });
+
+%---------------------------------------------------------------------
+% wildcard pattern
+%---------------------------------------------------------------------
+decode_terms(<<Code, _/binary>>, _Opts, _Buffer) ->
     {error, {unsupported, Code}}.
 
 %%--------------------------------------------------------------------
@@ -230,6 +257,13 @@ decode_atoms(Binary, _) ->
 decode_small_integer_ext(<<Integer, Rest/binary>>, _Opts) ->
     {ok, Integer, Rest}.
 
+decode_small_integer_ext_test() ->
+    [?assertEqual({ok, 0, <<>>}, decode_small_integer_ext(<<0>>, #{}))
+    ,?assertEqual({ok, 1, <<>>}, decode_small_integer_ext(<<1>>, #{}))
+    ,?assertEqual({ok, 255, <<>>}, decode_small_integer_ext(<<255>>, #{}))
+    ,?assertEqual({ok, 255, <<0>>}, decode_small_integer_ext(<<255,0>>, #{}))
+    ].
+
 decode_small_integer_ext_properties() ->
     Fun = fun(Binary) ->
                   <<Expected/integer, _/binary>> = Binary,
@@ -253,6 +287,14 @@ decode_small_integer_ext_properties() ->
 decode_integer_ext(<<Integer:32/signed-integer, Rest/binary>>, _Opts) ->
     {ok, Integer, Rest}.
 
+decode_integer_ext_test() ->
+    [?assertEqual({ok, 0, <<>>}, decode_small_integer_ext(<<0,0,0,0>>, #{}))
+    ,?assertEqual({ok, 255, <<>>}, decode_small_integer_ext(<<0,0,0,255>>, #{}))
+    ,?assertEqual({ok, 65280, <<>>}, decode_small_integer_ext(<<0,0,255,0>>, #{}))
+    ,?assertEqual({ok, 16711680, <<>>}, decode_small_integer_ext(<<0,255,0,0>>, #{}))
+    ,?assertEqual({ok, -16777216, <<>>}, decode_small_integer_ext(<<255,0,0,0>>, #{}))
+    ].
+
 decode_integer_ext_properties() ->
     Fun = fun(Binary) ->
                   <<Expected:32/integer, _/binary>> = Binary,
@@ -272,22 +314,40 @@ decode_integer_ext_properties() ->
       Return :: {ok, float(), binary()}.
 
 decode_float_ext(<<Float:31/binary, Rest/binary>>, _Opts) ->
-    {ok, Float, Rest}.
+    NewFloat = binary_to_float(Float),
+    {ok, NewFloat, Rest}.
+
+decode_float_ext_test() ->
+    E = #{ minor_version => 0 },
+    Opts = [{minor_version, 0}],
+    [?assertEqual({ok, 1.0, <<>>}, decode_float_ext(term_to_binary(1.0, Opts), E))
+    ,?assertEqual({ok, 2.0, <<>>}, decode_float_ext(term_to_binary(2.0, Opts), E))
+    ,?assertEqual({ok, 1.0e10, <<>>}, decode_float_ext(term_to_binary(1.0e10, Opts), E))
+    ].
 
 %%--------------------------------------------------------------------
 %% @hidden
 %% @doc
 %%
 %% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#new_float_ext
+%% see: https://en.wikipedia.org/wiki/Double-precision_floating-point_format
+%% @todo to fix, the implementation is not working correctly.
 %% @end
 %%--------------------------------------------------------------------
-%% -spec decode_new_float_ext(Binary, Opts) -> Return when
-%%       Binary :: binary(),
-%%       Opts :: map(),
-%%       Return :: {ok, float(), binary()}.
-%%
-%% decode_new_float_ext(<<70, Float:8/binary, Rest/binary>>, _Opts) ->
-%%     {error, not_supported}.
+-spec decode_new_float_ext(Binary, Opts) -> Return when
+      Binary :: binary(),
+      Opts :: map(),
+      Return :: {ok, float(), binary()}.
+
+decode_new_float_ext(<<_Float:64/bitstring, _Rest/binary>>, _Opts) ->
+    %% ExponentBias = 1023,
+    %% <<Sign:1, Exponent:11, Fraction:52>> = Float,
+    %% Value = math:pow(2, Exponent-ExponentBias) * (1/Fraction),
+    %% case Sign of
+    %%     0 -> {ok, Value, Rest};
+    %%     1 -> {ok, -Value, Rest}
+    %% end,
+    {error, {not_supported, new_float_ext}}.
 
 %%--------------------------------------------------------------------
 %% @hidden
@@ -303,7 +363,7 @@ decode_float_ext(<<Float:31/binary, Rest/binary>>, _Opts) ->
 decode_atom_utf8_ext(<<Length:16/unsigned-integer, Rest/binary>>, Opts) ->
     <<Atom:Length/binary, Rest2/binary>> = Rest,
     NewAtom = decode_atoms(Atom, Opts),
-    {ok, NewAtom, Rest}.
+    {ok, NewAtom, Rest2}.
 
 %%--------------------------------------------------------------------
 %% @hidden
@@ -319,7 +379,7 @@ decode_atom_utf8_ext(<<Length:16/unsigned-integer, Rest/binary>>, Opts) ->
 decode_small_atom_utf8_ext(<<Length/unsigned-integer, Rest/binary>>, Opts) ->
     <<Atom:Length/binary, Rest2/binary>> = Rest,
     NewAtom = decode_atoms(Atom, Opts),
-    {ok, NewAtom, Rest}.
+    {ok, NewAtom, Rest2}.
 
 %%--------------------------------------------------------------------
 %% @hidden
@@ -351,7 +411,7 @@ decode_atom_ext(<<Length:16/unsigned-integer, Rest/binary>>, Opts) ->
 decode_small_atom_ext(<<115, Length:8/unsigned-integer, Rest/binary>>, Opts) ->
     <<Atom:Length, Rest2/binary>> = Rest,
     NewAtom = decode_atoms(Atom, Opts),
-    {ok, NewAtom, Rest}.
+    {ok, NewAtom, Rest2}.
 
 %%--------------------------------------------------------------------
 %% @hidden
@@ -366,7 +426,7 @@ decode_small_atom_ext(<<115, Length:8/unsigned-integer, Rest/binary>>, Opts) ->
 decode_small_tuple_ext(<<104, Arity, Rest/binary>>, Opts) ->
     decode_small_tuple_ext2(Arity, Rest, Opts, []).
 
-decode_small_tuple_ext2(0, Rest ,Opts, Buffer) ->
+decode_small_tuple_ext2(0, Rest, _Opts, Buffer) ->
     {ok, Buffer, Rest};
 decode_small_tuple_ext2(Arity, Rest, Opts, Buffer) ->
     decode_small_tuple_ext2(Arity-1, Rest, Opts, Buffer).
@@ -383,5 +443,5 @@ encode(Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-encode(Data, Opts) ->
+encode(_Data, _Opts) ->
     ok.
