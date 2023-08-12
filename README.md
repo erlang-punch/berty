@@ -146,4 +146,9 @@ collection issue could help a lot, but if it's not possible for many
 reason, using an high level implementation of ETF with some way to
 control what kind of data are coming might be an "okayish" solution.
 
+The "Let it crash" philosophy is quite nice when developing high level
+application interacting in a safe place but this philosophy can't be
+applied in a place where uncontrolled data is coming. Some functions,
+like `binary_to_term/1` must be avoid at all cost.
+
 [^atom-garbage-collection]: Atom garbage collection by Thomas Lindgren, https://dl.acm.org/doi/10.1145/1088361.1088369

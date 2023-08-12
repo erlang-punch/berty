@@ -18,42 +18,43 @@
                , version = 1
                , compressed = false
                , data = []
+               , position = 0
                }).
 
 %---------------------------------------------------------------------
 % term codes from https://www.erlang.org/doc/apps/erts/erl_ext_dist
 %---------------------------------------------------------------------
--define(     ATOM_CACHE_REF,  82).
--define(           ATOM_EXT, 100). % deprecated
--define(      ATOM_UTF8_EXT, 118).
--define(         BINARY_EXT, 109).
--define(     BIT_BINARY_EXT,  77).
--define(         EXPORT_EXT, 113).
--define(          FLOAT_EXT,  99).
--define(            FUN_EXT, 117). % removed
--define(        INTEGER_EXT,  98).
--define(      LARGE_BIG_EXT, 111).
--define(    LARGE_TUPLE_EXT, 105).
--define(           LIST_EXT, 108).
--define(          LOCAL_EXT, 121).
--define(            MAP_EXT, 116).
--define(NEWER_REFERENCE_EXT,  90).
--define(      NEW_FLOAT_EXT,  70).
--define(        NEW_FUN_EXT, 112).
--define(        NEW_PID_EXT,  88).
--define(       NEW_PORT_EXT,  89).
--define(  NEW_REFERENCE_EXT, 114).
--define(            NIL_EXT, 106).
--define(            PID_EXT, 103).
--define(           PORT_EXT, 102).
--define(      REFERENCE_EXT, 101). % deprecated
--define(     SMALL_ATOM_EXT, 115). % deprecated
--define(SMALL_ATOM_UTF8_EXT, 119).
--define(      SMALL_BIG_EXT, 110).
--define(  SMALL_INTEGER_EXT,  97).
--define(    SMALL_TUPLE_EXT, 104).
--define(         STRING_EXT, 107).
--define(        V4_PORT_EXT, 120).
+-define(      ATOM_CACHE_REF,  82). % todo
+-define(            ATOM_EXT, 100). % implemented (deprecated)
+-define(       ATOM_UTF8_EXT, 118). % partial
+-define(          BINARY_EXT, 109). % implemented
+-define(      BIT_BINARY_EXT,  77). % implemented
+-define(          EXPORT_EXT, 113). % todo
+-define(           FLOAT_EXT,  99). % partial
+-define(             FUN_EXT, 117). % todo (removed)
+-define(         INTEGER_EXT,  98). % implemented
+-define(       LARGE_BIG_EXT, 111). % todo
+-define(     LARGE_TUPLE_EXT, 105). % implemented
+-define(            LIST_EXT, 108). % implemented
+-define(           LOCAL_EXT, 121). % todo
+-define(             MAP_EXT, 116). % todo
+-define( NEWER_REFERENCE_EXT,  90). % todo
+-define(       NEW_FLOAT_EXT,  70). % partial
+-define(         NEW_FUN_EXT, 112). % todo
+-define(         NEW_PID_EXT,  88). % todo
+-define(        NEW_PORT_EXT,  89). % todo
+-define(   NEW_REFERENCE_EXT, 114). % todo
+-define(             NIL_EXT, 106). % implemented
+-define(             PID_EXT, 103). % todo
+-define(            PORT_EXT, 102). % todo
+-define(       REFERENCE_EXT, 101). % todo (deprecated)
+-define(      SMALL_ATOM_EXT, 115). % implemented (deprecated)
+-define( SMALL_ATOM_UTF8_EXT, 119). % partial
+-define(       SMALL_BIG_EXT, 110). % todo
+-define(   SMALL_INTEGER_EXT,  97). % implemented
+-define(     SMALL_TUPLE_EXT, 104). % implemented
+-define(          STRING_EXT, 107). % implemented
+-define(         V4_PORT_EXT, 120). % todo
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -77,7 +78,11 @@ decode(Data) ->
       Return :: {ok, term()}.
 
 decode(Data, Opts) ->
-    decode_header(Data, Opts, #state{}).
+    case decode_header(Data, Opts, #state{}) of
+        {ok, Terms, <<>>} ->
+            {ok, Terms};
+        Elsewise -> Elsewise
+    end.
 
 decode_test() ->
     [?assertEqual({ok, 1}, decode(term_to_binary(1)))
@@ -99,7 +104,8 @@ decode_test() ->
       Return :: {ok, term()}.
 
 decode_header(<<131, Rest/binary>>, Opts, Buffer) ->
-    decode_terms(Rest, Opts, Buffer).
+    NewBuffer = Buffer#state{ position = Buffer#state.position+1 },
+    decode_terms(Rest, Opts, NewBuffer).
 
 %%--------------------------------------------------------------------
 %% @hidden
@@ -113,7 +119,7 @@ decode_header(<<131, Rest/binary>>, Opts, Buffer) ->
       Return :: {ok, term(), binary()}.
 
 decode_terms(<<>>, _Opts, #state{ data = Data} = _Buffer) ->
-    {ok, Data};
+    {ok, Data, <<>>};
 decode_terms(Rest, _Opts, #state{ data = Data } = _Buffer)
   when is_number(Data) orelse is_atom(Data) ->
     {ok, Data, Rest};
@@ -196,6 +202,19 @@ decode_terms(<<?LIST_EXT, _Rest/binary>>, #{ list_ext := disabled }, _Buffer) ->
     {error, {list_ext, disabled}};
 decode_terms(<<?LIST_EXT, Rest/binary>>, Opts, _Buffer) ->
     {ok, _List, _Rest2} = decode_list_ext(Rest, Opts);
+
+%---------------------------------------------------------------------
+% binary and bitstring
+%---------------------------------------------------------------------
+decode_terms(<<?BINARY_EXT, Rest/binary>>, #{ binary_ext := disabled }, _Buffer) ->
+    {error, {binary_ext, disabeld}};
+decode_terms(<<?BINARY_EXT, Rest/binary>>, Opts, _Buffer) ->
+    {ok, _Binary, _Rest2} = decode_binary_ext(Rest, Opts);
+
+decode_terms(<<?BIT_BINARY_EXT, Rest/binary>>, #{ bit_binary_ext := disabled }, _Buffer) ->
+    {error, {bit_binary_ext, disabled}};
+decode_terms(<<?BIT_BINARY_EXT, Rest/binary>>, Opts, _Buffer) ->
+    {ok, _Bitstring, _Rest2} = decode_bit_binary_ext(Rest, Opts);
 
 %---------------------------------------------------------------------
 % wildcard pattern
@@ -577,6 +596,24 @@ decode_list_ext2(0, Rest, _Opts, Buffer) ->
 decode_list_ext2(Length, Elements, Opts, Buffer) ->
     {ok, Term, Rest} = decode_terms(Elements, Opts, #state{}),
     decode_list_ext2(Length-1, Rest, Opts, [Term|Buffer]).
+
+%%--------------------------------------------------------------------
+%% @hidden
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+decode_binary_ext(<<Length:32/unsigned-integer, Rest/binary>>, Opts) ->
+    <<Binary:Length/binary, Rest2/binary>> = Rest,
+    {ok, Binary, Rest2}.
+
+%%--------------------------------------------------------------------
+%% @hidden
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+decode_bit_binary_ext(<<Length:32/unsigned-integer, Bits:8, Rest/binary>>, Opts) ->
+    <<Binary:(Length-1)/binary, Byte:1/binary, Rest2/binary>> = Rest,
+    {ok, <<Binary/binary, Byte:Bits/bitstring>>, Rest2}.
 
 %%--------------------------------------------------------------------
 %% @doc
