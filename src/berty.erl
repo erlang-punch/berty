@@ -20,6 +20,41 @@
                , data = []
                }).
 
+%---------------------------------------------------------------------
+% term codes from https://www.erlang.org/doc/apps/erts/erl_ext_dist
+%---------------------------------------------------------------------
+-define(     ATOM_CACHE_REF,  82).
+-define(           ATOM_EXT, 100). % deprecated
+-define(      ATOM_UTF8_EXT, 118).
+-define(         BINARY_EXT, 109).
+-define(     BIT_BINARY_EXT,  77).
+-define(         EXPORT_EXT, 113).
+-define(          FLOAT_EXT,  99).
+-define(            FUN_EXT, 117). % removed
+-define(        INTEGER_EXT,  98).
+-define(      LARGE_BIG_EXT, 111).
+-define(    LARGE_TUPLE_EXT, 105).
+-define(           LIST_EXT, 108).
+-define(          LOCAL_EXT, 121).
+-define(            MAP_EXT, 116).
+-define(NEWER_REFERENCE_EXT,  90).
+-define(      NEW_FLOAT_EXT,  70).
+-define(        NEW_FUN_EXT, 112).
+-define(        NEW_PID_EXT,  88).
+-define(       NEW_PORT_EXT,  89).
+-define(  NEW_REFERENCE_EXT, 114).
+-define(            NIL_EXT, 106).
+-define(            PID_EXT, 103).
+-define(           PORT_EXT, 102).
+-define(      REFERENCE_EXT, 101). % deprecated
+-define(     SMALL_ATOM_EXT, 115). % deprecated
+-define(SMALL_ATOM_UTF8_EXT, 119).
+-define(      SMALL_BIG_EXT, 110).
+-define(  SMALL_INTEGER_EXT,  97).
+-define(    SMALL_TUPLE_EXT, 104).
+-define(         STRING_EXT, 107).
+-define(        V4_PORT_EXT, 120).
+
 %%--------------------------------------------------------------------
 %% @doc
 %% @see decode/2
@@ -54,7 +89,7 @@ decode_test() ->
 
 %%--------------------------------------------------------------------
 %% @hidden
-%% @doc
+ %% @doc
 %% @end
 %%--------------------------------------------------------------------
 -spec decode_header(Binary, Opts, Buffer) -> Return when
@@ -75,61 +110,92 @@ decode_header(<<131, Rest/binary>>, Opts, Buffer) ->
       Binary :: binary(),
       Opts :: map(),
       Buffer :: #state{},
-      Return :: {ok, term()}.
+      Return :: {ok, term(), binary()}.
 
 decode_terms(<<>>, _Opts, #state{ data = Data} = _Buffer) ->
     {ok, Data};
-decode_terms(_, _Opts, #state{ data = Data } = _Buffer )
+decode_terms(Rest, _Opts, #state{ data = Data } = _Buffer)
   when is_number(Data) orelse is_atom(Data) ->
-    {ok, Data};
-
-%---------------------------------------------------------------------
-% nil support
-%---------------------------------------------------------------------
-decode_terms(<<106, Rest/binary>>, Opts, Buffer) ->
-    decode_terms(Rest, Opts, Buffer#state{ data = nil });
+    {ok, Data, Rest};
 
 %---------------------------------------------------------------------
 % integers support
 %---------------------------------------------------------------------
-% small_integer_ext
-decode_terms(<<97, Rest/binary>>, Opts, Buffer) ->
-    {ok, Integer, Rest2} = decode_small_integer_ext(Rest, Opts),
-    decode_terms(Rest2, Opts, Buffer#state{ data = Integer });
-% integer_ext
-decode_terms(<<98, Rest/binary>>, Opts, Buffer) ->
-    {ok, Integer, Rest2} = decode_integer_ext(Rest, Opts),
-    decode_terms(Rest2, Opts, Buffer#state{ data = Integer});
+decode_terms(<<?SMALL_INTEGER_EXT, _Rest/binary>>, #{ small_integer_ext := disabled }, _Buffer) ->
+    {error, {small_integer_ext, disabled}};
+decode_terms(<<?SMALL_INTEGER_EXT, Rest/binary>>, Opts, _Buffer) ->
+    {ok, _Integer, _Rest2} = decode_small_integer_ext(Rest, Opts);
+
+decode_terms(<<?INTEGER_EXT, _Rest/binary>>, #{ integer_ext := disable}, _Buffer) ->
+    {error, {integer_ext, disabled}};
+decode_terms(<<?INTEGER_EXT, Rest/binary>>, Opts, _Buffer) ->
+    {ok, _Integer, _Rest2} = decode_integer_ext(Rest, Opts);
 
 %---------------------------------------------------------------------
 % floats support
 %---------------------------------------------------------------------
-% float_ext
-decode_terms(<<99, Rest/binary>>, #{ minor_version := 0 } = Opts, Buffer) ->
-    {ok, Float, Rest2} = decode_float_ext(Rest, Opts),
-    decode_terms(Rest2, Opts, Buffer#state{ data = Float });
+decode_terms(<<?FLOAT_EXT, _Rest/binary>>, #{ float_ext := disabled }, _Buffer) ->
+    {error, {float_ext, disabled}};
+decode_terms(<<?FLOAT_EXT, Rest/binary>>, #{ minor_version := 0 } = Opts, _Buffer) ->
+    {ok, _Float, _Rest2} = decode_float_ext(Rest, Opts);
 
 %---------------------------------------------------------------------
 % atoms support
 %---------------------------------------------------------------------
-% atom_ext
-decode_terms(<<100, Rest/binary>>, Opts, Buffer) ->
+decode_terms(<<?ATOM_EXT, _Rest/binary>>, #{ atom_ext := disabled }, _Buffer) ->
+    {error, {atom_ext, disabled}};
+decode_terms(<<?ATOM_EXT, Rest/binary>>, Opts, _Buffer) ->
     ?LOG_WARNING("ATOM_EXT is deprecated", []),
-    {ok, Atom, Rest2} = decode_atom_ext(Rest, Opts),
-    decode_terms(Rest2, Opts, Buffer#state{ data = Atom });
-% small_atom_ext
-decode_terms(<<115, Rest/binary>>, Opts, Buffer) ->
+    {ok, _Atom, _Rest2} = decode_atom_ext(Rest, Opts);
+
+decode_terms(<<?SMALL_ATOM_EXT, _Rest/binary>>, #{ small_atom_ext := disabled }, _Buffer) ->
+    {error, {small_atom_ext, disabled}};
+decode_terms(<<?SMALL_ATOM_EXT, Rest/binary>>, Opts, _Buffer) ->
     ?LOG_WARNING("SMALL_ATOM_EXT is deprecated", []),
-    {ok, Atom, Rest2} = decode_small_atom_ext(Rest, Opts),
-    decode_terms(Rest2, Opts, Buffer#state{ data = Atom });
-% atom_utf8_ext
-decode_terms(<<118, Rest/binary>>, Opts, Buffer) ->
-    {ok, Atom, Rest2} = decode_atom_utf8_ext(Rest, Opts),
-    decode_terms(Rest2, Opts, Buffer#state{ data = Atom });
-% small_atom_utf8_ext
-decode_terms(<<119, Rest/binary>>, Opts, Buffer) ->
-    {ok, Atom, Rest2} = decode_small_atom_utf8_ext(Rest, Opts),
-    decode_terms(Rest2, Opts, Buffer#state{ data = Atom });
+    {ok, _Atom, _Rest2} = decode_small_atom_ext(Rest, Opts);
+
+decode_terms(<<?ATOM_UTF8_EXT, _Rest/binary>>, #{ atom_utf8_ext := disabled }, _Buffer) ->
+    {error, {atom_utf8_ext, disabled}};
+decode_terms(<<?ATOM_UTF8_EXT, Rest/binary>>, Opts, _Buffer) ->
+    {ok, _Atom, _Rest2} = decode_atom_utf8_ext(Rest, Opts);
+
+decode_terms(<<?SMALL_ATOM_UTF8_EXT, _Rest/binary>>, #{ small_atom_utf8_ext := disabled }, _Buffer) ->
+    {error, {small_atom_utf8_ext, disabled}};
+decode_terms(<<?SMALL_ATOM_UTF8_EXT, Rest/binary>>, Opts, _Buffer) ->
+    {ok, _Atom, _Rest2} = decode_small_atom_utf8_ext(Rest, Opts);
+
+%---------------------------------------------------------------------
+% tuple support
+%---------------------------------------------------------------------
+decode_terms(<<?SMALL_TUPLE_EXT, _Rest/binary>>, #{ small_tuple_ext := disabled }, _Buffer) ->
+    {error, {small_tuple_ext, disabled}};
+decode_terms(<<?SMALL_TUPLE_EXT, Rest/binary>>, Opts, _Buffer) ->
+    {ok, _Tuple, _Rest2} = decode_small_tuple_ext(Rest, Opts);
+
+decode_terms(<<?LARGE_TUPLE_EXT, _Rest/binary>>, #{ large_tuple_ext := disabled }, _Buffer) ->
+    {error, {large_tuple_ext, disabled}};
+decode_terms(<<?LARGE_TUPLE_EXT, Rest/binary>>, Opts, _Buffer) ->
+    {ok, _Tuple, _Rest2} = decode_large_tuple_ext(Rest, Opts);
+
+%---------------------------------------------------------------------
+% list and string support
+%---------------------------------------------------------------------
+decode_terms(<<?NIL_EXT, _Rest/binary>>, #{ string_ext := disabled }, _Buffer) ->
+    {error, {string_ext, disabled}};
+decode_terms(<<?NIL_EXT, _Rest/binary>>, #{ list_ext := disabled }, _Buffer) ->
+    {error, {list_ext, disabled}};
+decode_terms(<<?NIL_EXT, Rest/binary>>, _Opts, _Buffer) ->
+    {ok, [], Rest};
+
+decode_terms(<<?STRING_EXT, _Rest/binary>>, #{ string_ext := disabled }, _Buffer) ->
+    {error, {string_ext, disabled}};
+decode_terms(<<?STRING_EXT, Rest/binary>>, Opts, _Buffer) ->
+    {ok, _String, _Rest2} = decode_string_ext(Rest, Opts);
+
+decode_terms(<<?LIST_EXT, _Rest/binary>>, #{ list_ext := disabled }, _Buffer) ->
+    {error, {list_ext, disabled}};
+decode_terms(<<?LIST_EXT, Rest/binary>>, Opts, _Buffer) ->
+    {ok, _List, _Rest2} = decode_list_ext(Rest, Opts);
 
 %---------------------------------------------------------------------
 % wildcard pattern
@@ -423,14 +489,67 @@ decode_small_atom_ext(<<115, Length:8/unsigned-integer, Rest/binary>>, Opts) ->
       Opts :: map(),
       Return :: {ok, tuple(), binary()}.
 
-decode_small_tuple_ext(<<104, Arity, Rest/binary>>, Opts) ->
+decode_small_tuple_ext(<<0, Rest/binary>>, _Opts) ->
+    {ok, {}, Rest};
+decode_small_tuple_ext(<<Arity/unsigned-integer, Rest/binary>>, Opts) ->
     decode_small_tuple_ext2(Arity, Rest, Opts, []).
 
 decode_small_tuple_ext2(0, Rest, _Opts, Buffer) ->
-    {ok, Buffer, Rest};
+    Tuple = erlang:list_to_tuple(lists:reverse(Buffer)),
+    {ok, Tuple, Rest};
 decode_small_tuple_ext2(Arity, Rest, Opts, Buffer) ->
-    decode_small_tuple_ext2(Arity-1, Rest, Opts, Buffer).
+    {ok, Term, Rest2} = decode_terms(Rest, Opts, #state{}),
+    decode_small_tuple_ext2(Arity-1, Rest2, Opts, [Term|Buffer]).
 
+%%--------------------------------------------------------------------
+%% @hidden
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+-spec decode_large_tuple_ext(Binary, Opts) -> Return when
+      Binary :: binary(),
+      Opts :: map(),
+      Return :: {ok, tuple(), binary()}.
+
+decode_large_tuple_ext(<<0:32, Rest/binary>>, _Opts) ->
+    {ok, {}, Rest};
+decode_large_tuple_ext(<<Arity:32/unsigned-integer, Rest/binary>>, Opts) ->
+    decode_large_tuple_ext2(Arity, Rest, Opts, []).
+
+decode_large_tuple_ext2(0, Rest, _Opts, Buffer) ->
+    Tuple = erlang:list_to_tuple(lists:reverse(Buffer)),
+    {ok, Tuple, Rest};
+decode_large_tuple_ext2(Arity, Rest, Opts, Buffer) ->
+    {ok, Term, Rest2} = decode_terms(Rest, Opts, #state{}),
+    decode_large_tuple_ext2(Arity-1, Rest2, Opts, [Term|Buffer]).
+
+%%--------------------------------------------------------------------
+%% @hidden
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+decode_string_ext(<<Length:16/unsigned-integer, Characters/binary>>, Opts) ->
+    decode_string_ext2(Length, Characters, Opts, "").
+
+decode_string_ext2(0, Rest, _Opts, Buffer) ->
+    {ok, lists:reverse(Buffer), Rest};
+decode_string_ext2(Length, <<Character:8/unsigned-integer, Rest/binary>>, Opts, Buffer) ->
+    decode_string_ext2(Length-1, Rest, Opts, [Character|Buffer]).
+
+%%--------------------------------------------------------------------
+%% @hidden
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+decode_list_ext(<<Length:32/unsigned-integer, Elements/binary>>, Opts) ->
+    {ok, List, <<106, Rest/binary>>} = decode_list_ext2(Length, Elements, Opts, []),
+    {ok, List, Rest}.
+
+decode_list_ext2(0, Rest, _Opts, Buffer) ->
+    {ok, lists:reverse(Buffer), Rest};
+decode_list_ext2(Length, Elements, Opts, Buffer) ->
+    {ok, Term, Rest} = decode_terms(Elements, Opts, #state{}),
+    decode_list_ext2(Length-1, Rest, Opts, [Term|Buffer]).
 
 %%--------------------------------------------------------------------
 %% @doc
