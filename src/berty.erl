@@ -58,6 +58,43 @@
 -define(          STRING_EXT, 107). % implemented
 -define(         V4_PORT_EXT, 120). % todo
 
+%---------------------------------------------------------------------
+% helper function to map code and code name
+%---------------------------------------------------------------------
+-define(CODE(Code,Name), code(Code) -> Name; code(Name) -> Code).
+?CODE( 70, new_float_ext);
+?CODE( 77, bit_binary_ext);
+?CODE( 82, atom_cache_ref);
+?CODE( 88, new_pid_ext);
+?CODE( 89, new_port_ext);
+?CODE( 90, newer_reference_ext);
+?CODE( 97, small_integer_ext);
+?CODE( 98, integer_ext);
+?CODE( 99, float_ext);
+?CODE(100, atom_ref);
+?CODE(101, reference_ext);
+?CODE(102, port_ext);
+?CODE(103, pid_ext);
+?CODE(104, small_tuple_ext);
+?CODE(105, large_tuple_ext);
+?CODE(106, nil_ext);
+?CODE(107, string_ext);
+?CODE(108, list_ext);
+?CODE(109, binary_ext);
+?CODE(110, small_big_ext);
+?CODE(111, large_big_ext);
+?CODE(112, new_fun_ext);
+?CODE(113, export_ext);
+?CODE(114, new_reference_ext);
+?CODE(115, small_atom_ext);
+?CODE(116, map_ext);
+?CODE(117, fun_ext);
+?CODE(118, atom_utf8_ext);
+?CODE(119, small_atom_utf8_ext);
+?CODE(120, v4_port_ext);
+?CODE(121, local_ext);
+code(Elsewise) -> Elsewise.
+
 %%--------------------------------------------------------------------
 %% @doc
 %% @see decode/2
@@ -219,10 +256,22 @@ decode_terms(<<?BIT_BINARY_EXT, Rest/binary>>, Opts, _Buffer) ->
     {ok, _Bitstring, _Rest2} = decode_bit_binary_ext(Rest, Opts);
 
 %---------------------------------------------------------------------
+% port
+%---------------------------------------------------------------------
+decode_terms(<<?PORT_EXT, Rest/binary>>, #{ port_ext := enabled } = Opts, _Buffer) ->
+    {ok, _Port, _Rest2} = decode_port_ext(Rest, Opts);
+
+decode_terms(<<?NEW_PORT_EXT, Rest/binary>>, #{ new_port_ext := enabled } = Opts, _Buffer) ->
+    {ok, _Port, _Rest2} = decode_new_port_ext(Rest, Opts);
+
+decode_terms(<<?V4_PORT_EXT, Rest/binary>>, #{ v4_port_ext := enabled } = Opts, _Buffer) ->
+    {ok, _Port, _Rest2} = decode_v4_port_ext(Rest, Opts);
+
+%---------------------------------------------------------------------
 % wildcard pattern
 %---------------------------------------------------------------------
 decode_terms(<<Code, _/binary>>, _Opts, _Buffer) ->
-    {error, {unsupported, Code}}.
+    {error, {unsupported, code(Code)}}.
 
 %%--------------------------------------------------------------------
 %% @hidden
@@ -616,6 +665,29 @@ decode_binary_ext(<<Length:32/unsigned-integer, Rest/binary>>, Opts) ->
 decode_bit_binary_ext(<<Length:32/unsigned-integer, Bits:8, Rest/binary>>, Opts) ->
     <<Binary:(Length-1)/binary, Byte:1/binary, Rest2/binary>> = Rest,
     {ok, <<Binary/binary, Byte:Bits/bitstring>>, Rest2}.
+
+%%--------------------------------------------------------------------
+%% @hidden
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+decode_port_ext(Binary, Opts) ->
+    {ok, Atom, Rest} = decode_terms(Binary, Opts, #state{}),
+    <<ID:32/unsigned-integer, Creation:1/binary, Rest2/binary>> = Rest,
+    StringPort = lists:flatten(io_lib:format("#Port<~B.~B>", [Creation,ID])),
+    {tofix, list_to_port(StringPort), Rest2}.
+
+decode_new_port_ext(Binary, Opts) ->
+    {ok, Atom, Rest} = decode_terms(Binary, Opts, #state{}),
+    <<ID:32/unsigned-integer, Creation:32/unsigned-integer, Rest2/binary>> = Rest,
+    StringPort = lists:flatten(io_lib:format("#Port<~B.~B>", [Creation,ID])),
+    {tofix, list_to_port(StringPort), Rest2}.
+
+decode_v4_port_ext(Binary, Opts) ->
+    {ok, Atom, Rest} = decode_terms(Binary, Opts, #state{}),
+    <<ID:64/unsigned-integer, Creation:32/unsigned-integer, Rest2/binary>> = Rest,
+    StringPort = lists:flatten(io_lib:format("#Port<~B.~B>", [Creation,ID])),
+    {tofix, list_to_port(StringPort), Rest2}.
 
 %%--------------------------------------------------------------------
 %% @doc
