@@ -1,4 +1,6 @@
 %%%===================================================================
+%%% @copyright Erlang Punch
+%%% @author Mathieu Kerjouan
 %%% @doc
 %%%
 %%% == Usage ==

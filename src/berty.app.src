@@ -1,5 +1,5 @@
 {application, berty,
- [{description, "An OTP application"},
+ [{description, "A clean, safe and flexible implementation Erlang External Term Format."},
   {vsn, "0.1.0"},
   {registered, []},
   {mod, {berty_app, []}},
@@ -10,5 +10,5 @@
   {env,[]},
   {modules, []},
   {licenses, ["MIT"]},
-  {links, []}
+  {links, ["https://github.com/erlang-punch/berty"]}
  ]}.

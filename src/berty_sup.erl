@@ -1,7 +1,9 @@
-%%%-------------------------------------------------------------------
-%% @doc berty top level supervisor.
-%% @end
-%%%-------------------------------------------------------------------
+%%%===================================================================
+%%% @copyright Erlang Punch
+%%% @author Mathieu Kerjouan
+%%% @doc
+%%% @end
+%%%===================================================================
 -module(berty_sup).
 -behaviour(supervisor).
 -export([start_link/0]).
@@ -11,15 +13,6 @@
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
-%% sup_flags() = #{strategy => strategy(),         % optional
-%%                 intensity => non_neg_integer(), % optional
-%%                 period => pos_integer()}        % optional
-%% child_spec() = #{id => child_id(),       % mandatory
-%%                  start => mfargs(),      % mandatory
-%%                  restart => restart(),   % optional
-%%                  shutdown => shutdown(), % optional
-%%                  type => worker(),       % optional
-%%                  modules => modules()}   % optional
 init([]) ->
     SupFlags = #{strategy => one_for_all,
                  intensity => 0,
@@ -27,4 +20,3 @@ init([]) ->
     ChildSpecs = [],
     {ok, {SupFlags, ChildSpecs}}.
 
-%% internal functions
