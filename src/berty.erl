@@ -265,6 +265,24 @@ decode_terms(<<Code, _/binary>>, _Opts, _Buffer) ->
 %% {ok, "ok"}
 %% '''
 %%
+%% Finally, a simple atom whitelist. If an atom (defined as binary) is
+%% not present in the list, it is returned as binary, else, it is
+%% converted as atoms.
+%%
+%% ```
+%% Binary = [1,2,3,[4,5,6,{1,2,3}, "test", atom]].
+%%
+%% % with an empty whitelist
+%% {ok,[1,2,3,[4,5,6,{1,2,3},"test",<<"atom">>]],<<>>}
+%%   = berty:decode(Binary, #{ atoms => {whitelist, []}}).
+%% % Warning: ATOM_EXT is deprecated
+%% % Warning: Atom <<"atom">> not in whitelist
+%%
+%% {ok,[1,2,3,[4,5,6,{1,2,3},"test",atom]],<<>>}
+%%   = berty:decode(Binary, #{ atoms => {whitelist, [<<"atom">>]}}).
+%% % Warning: ATOM_EXT is deprecated
+%% '''
+%%
 %% @end
 %%--------------------------------------------------------------------
 -spec decode_atoms(Binary, Opts) -> Return when
@@ -280,6 +298,15 @@ decode_terms(<<Code, _/binary>>, _Opts, _Buffer) ->
       Return :: binary() | string() | atom().
 
 % @TODO add utf8 support for atoms
+decode_atoms(Binary, #{ atoms := {whitelist, Whitelist} })
+  when is_list(Whitelist) ->
+    case lists:member(Binary, Whitelist) of
+        true ->
+            erlang:binary_to_atom(Binary);
+        false ->
+            ?LOG_WARNING("Atom ~p not in whitelist", [Binary]),
+            Binary
+    end;
 decode_atoms(Binary, #{ atoms := create }) ->
     erlang:binary_to_atom(Binary);
 decode_atoms(Binary, #{ atoms := {create, Limit} })
