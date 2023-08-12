@@ -152,3 +152,73 @@ applied in a place where uncontrolled data is coming. Some functions,
 like `binary_to_term/1` must be avoid at all cost.
 
 [^atom-garbage-collection]: Atom garbage collection by Thomas Lindgren, https://dl.acm.org/doi/10.1145/1088361.1088369
+
+## What about ETF schema?
+
+This answer is a draft, a sandbox to design an Erlang ETF Schema
+feature.
+
+It might be great to have syntax to create ETF schema, a bit like
+protobuf[^protobuf], json schema[^json-schema], XML[^xml] (with
+XLST[^xlst]) or ASN.1[^asn.1].
+
+```erlang
+schema1() ->
+  integer().
+  
+schema2() ->
+  tuple([[atom(ok), integer()]
+        ,[atom(error), string(1024)]).
+        
+% fun ({ok, X}) when is_integer(X) -> true;
+%     ({error, X) when is_list(X) andalso length(X) =< 1024 -> is_string(X);
+%     (_) -> false.
+        
+schema3() ->
+  tuple(
+```
+
+Here the final representation.
+
+```erlang
+[{tuple, [{atom, [ok]}, {integer, []}]}
+,{tuple, [{atom, [error]}, {string, [1024]}]}
+]
+% or
+[[tuple, [2]]
+,[atom, [ok,error]]
+,[integer, []]
+,[string, [1024]]
+].
+```
+
+[^protobuf]: https://protobuf.dev/overview/
+[^json-schema]: https://json-schema.org/
+[^xml]: https://en.wikipedia.org/wiki/XML
+[^xlst]: https://en.wikipedia.org/wiki/XSLT
+[^asn.1]: https://en.wikipedia.org/wiki/ASN.1
+
+## What about an ETF path feature?
+
+Another feature like xmlpath or jsonpath is also required as well, an
+easy syntax and comprehensible one needs to be created. I would like
+to include:
+
+ 1. pattern matching
+
+```erlang
+% how to create an etf path?
+% first example
+% ETF = #{ key => #{ key2 => { ok, "test"} } }.
+"test" = path(ETF, "#key#key2{ok,@}")
+
+% second example
+% ETF = [{ok, "test"}, {error, badarg}, {ok, "data"}].
+[{ok, "test"},{ok, "data"}] = path(ETF, "[{ok,_}]")
+% or
+[]{ok,_}
+
+% third example
+% ETF = {ok, #{ <<"data">> => [<<"test">>] }}.
+[<<"test">>] = path(ETF, "{ok,@}#!data").
+```
