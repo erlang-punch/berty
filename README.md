@@ -325,3 +325,42 @@ Yes, "Faster and more efficient", but can destroy your whole platform
 in few second. Don't do that. Please. Unfortunately,
 [inaka.net](inaka.net) seems to be down, it would have been funny to
 play with that.
+
+## Is there a "risk analysis" for each terms somewhere?
+
+Probably, but I did not find a lot on that. Here a short summary of
+each terms is it safe or not and with the risk(s).
+
+| Terms                 | Code |    Safe? | Risks
+|:----------------------|-----:|---------:|--------------------------|
+| `ATOM_CACHE_REF`      |   82 |       no | atom exhaustion
+| `ATOM_EXT`            |  100 |       no | atom exhaustion
+| `ATOM_UTF8_EXT`       |  118 |       no | atom exhaustion
+| `BINARY_EXT`          |  109 |    maybe | dynamic binary length (32bits)
+| `BIT_BINARY_EXT`      |   77 |    maybe | dynamic bitstring length (32bits)
+| `EXPORT_EXT`          |  113 |       no | atom exhaustion
+| `FLOAT_EXT`           |   99 |      yes | 31 bytes float fixed length
+| `FUN_EXT`             |  117 |       no | atoms exhaution
+| `INTEGER_EXT`         |   98 |      yes | 1 byte fixed length
+| `LARGE_BIG_EXT`       |  111 |    maybe | dynamic integer length (32bits)
+| `LARGE_TUPLE_EXT`     |  105 |    maybe | dynamic tuple length (32bits)
+| `LIST_EXT`            |  108 |    maybe | dynamic list length (32bits)
+| `LOCAL_EXT`           |  121 |      yes | atom exhaustion
+| `MAP_EXT`             |  116 |    maybe | dynamic pair length (32bits)
+| `NEWER_REFERENCE_EXT` |   90 |       no | memory exhaustion
+| `NEW_FLOAT_EXT`       |   70 |      yes | 8 bytes fixed float
+| `NEW_FUN_EXT`         |  112 |       no | atom exhaution
+| `NEW_PID_EXT`         |   88 |       no | atom exhaution
+| `NEW_PORT_EXT`        |   89 |       no | atom exhaution
+| `NEW_REFERENCE_EXT`   |  114 |    maybe | dynamic reference length (16bits)
+| `NIL_EXT`             |  106 |      yes | fixed length
+| `PID_EXT`             |  103 |       no | atom exhaustion
+| `PORT_EXT`            |  102 |       no | atom exhaustion
+| `REFERENCE_EXT`       |  101 |       no | atom exhaustion
+| `SMALL_ATOM_EXT`      |  115 |       no | atom exhaustion
+| `SMALL_ATOM_UTF8_EXT` |  119 |       no | atom exhaustion
+| `SMALL_BIG_EXT`       |  110 |    maybe | dynamic integer length (8bits)
+| `SMALL_INTEGER_EXT`   |   97 |      yes | fixed size
+| `SMALL_TUPLE_EXT`     |  104 |    maybe | dynamic tuple length (8bits)
+| `STRING_EXT`          |  107 |    maybe | dynamic string length (16bits)
+| `V4_PORT_EXT`         |  120 |       no | atom exhaustion
