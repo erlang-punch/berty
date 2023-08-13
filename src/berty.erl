@@ -39,23 +39,23 @@
 %%% ```
 %%% | Terms              | Code |  Default | State                    |
 %%% |---------------------|-----|----------|--------------------------|
-%%% | ATOM_CACHE_REF      |  82 |  enabled | todo
+%%% | ATOM_CACHE_REF      |  82 |  enabled | partial (unstable)
 %%% | ATOM_EXT            | 100 |  enabled | implemented (deprecated)
 %%% | ATOM_UTF8_EXT       | 118 |  enabled | partial (unstable)
 %%% | BINARY_EXT          | 109 |  enabled | implemented
 %%% | BIT_BINARY_EXT      |  77 |  enabled | implemented
-%%% | EXPORT_EXT          | 113 | disabled | todo
+%%% | EXPORT_EXT          | 113 | disabled | implemented (unstable)
 %%% | FLOAT_EXT           |  99 |  enabled | partial
 %%% | FUN_EXT             | 117 | disabled | todo (removed)
 %%% | INTEGER_EXT         |  98 |  enabled | implemented
-%%% | LARGE_BIG_EXT       | 111 |  enabled | implemented
+%%% | LARGE_BIG_EXT       | 111 |  enabled | implemented (slow or cursed)
 %%% | LARGE_TUPLE_EXT     | 105 |  enabled | implemented
 %%% | LIST_EXT            | 108 |  enabled | implemented
 %%% | LOCAL_EXT           | 121 | disabled | todo
 %%% | MAP_EXT             | 116 |  enabled | partial (unstable)
 %%% | NEWER_REFERENCE_EXT |  90 | disabled | todo
 %%% | NEW_FLOAT_EXT       |  70 |  enabled | partial (unstable)
-%%% | NEW_FUN_EXT         | 112 | disabled | todo
+%%% | NEW_FUN_EXT         | 112 | disabled | partial (cursed)
 %%% | NEW_PID_EXT         |  88 | disabled | partial (unstable)
 %%% | NEW_PORT_EXT        |  89 | disabled | partial (unstable)
 %%% | NEW_REFERENCE_EXT   | 114 | disabled | todo
@@ -65,7 +65,7 @@
 %%% | REFERENCE_EXT       | 101 | disabled | todo (deprecated)
 %%% | SMALL_ATOM_EXT      | 115 |  enabled | implemented (deprecated)
 %%% | SMALL_ATOM_UTF8_EXT | 119 |  enabled | partial (unstable)
-%%% | SMALL_BIG_EXT       | 110 |  enabled | implemented
+%%% | SMALL_BIG_EXT       | 110 |  enabled | implemented (slow or cursed)
 %%% | SMALL_INTEGER_EXT   |  97 |  enabled | implemented
 %%% | SMALL_TUPLE_EXT     | 104 |  enabled | implemented
 %%% | STRING_EXT          | 107 |  enabled | implemented
@@ -77,7 +77,7 @@
 -module(berty).
 -export([decode/1, decode/2]).
 -export([encode/1, encode/2]).
--compile(export_all).
+% -compile(export_all).
 -include_lib("kernel/include/logger.hrl").
 -include_lib("proper/include/proper.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -280,6 +280,9 @@ decode_terms(<<?SMALL_ATOM_UTF8_EXT, _Rest/binary>>, #{ small_atom_utf8_ext := d
 decode_terms(<<?SMALL_ATOM_UTF8_EXT, Rest/binary>>, Opts, _Buffer) ->
     {ok, _Atom, _Rest2} = decode_small_atom_utf8_ext(Rest, Opts);
 
+decode_terms(<<?ATOM_CACHE_REF, Rest/binary>>, #{ atom_cache_ref := enabled } = Opts, _Buffer) ->
+    {ok, _AtomRef, _Rest2} = decode_atom_cache_ref(Rest, Opts);
+
 %---------------------------------------------------------------------
 % tuple support
 %---------------------------------------------------------------------
@@ -366,11 +369,20 @@ decode_terms(<<?LARGE_BIG_EXT, Rest/binary>>, Opts, _Buffer) ->
 decode_terms(<<?EXPORT_EXT, Rest/binary>>, #{ export_ext := enabled } = Opts, _Buffer) ->
     {ok, _Fun, _Rest2} = decode_export_ext(Rest, Opts);
 
+decode_terms(<<?NEW_FUN_EXT, Rest/binary>>, #{ new_fun_ext := enabled } = Opts, _Buffer) ->
+    {ok, _Fun, _Rest2} = decode_new_fun_ext(Rest, Opts);
+
 %---------------------------------------------------------------------
 % maps
 %---------------------------------------------------------------------
 decode_terms(<<?MAP_EXT, Rest/binary>>, Opts, _Buffer) ->
     {ok, _Map, _Rest2} = decode_map_ext(Rest, Opts);
+
+%---------------------------------------------------------------------
+% reference
+%---------------------------------------------------------------------
+decode_terms(<<?NEWER_REFERENCE_EXT, Rest/binary>>, #{ newer_reference_ext := enabled } = Opts, _Buffer) ->
+    {ok, _Ref, _Rest2} = decode_newer_reference_ext(Rest, Opts);
 
 %---------------------------------------------------------------------
 % wildcard pattern
@@ -945,6 +957,29 @@ decode_export_ext(Binary, Opts) ->
 
 %%--------------------------------------------------------------------
 %% @hidden
+%% @doc This part of the code is cursed by reusing binary_to_term/1.
+%%      don't use it in production.
+%% @end
+%%--------------------------------------------------------------------
+decode_new_fun_ext(<<Size:32/unsigned-integer, Arity:8/unsigned-integer
+                    ,Unique:8/binary, Index:32/unsigned-integer
+                    ,NumFreeVariable:32/unsigned-integer, Rest/binary>> = Data, Opts) ->
+    % {ok, ModuleName, RestModule} = decode_terms(Fun, Opts#{ atoms => create}, #state{}),
+    % {ok, OldIndex, RestOldIndex} = decode_terms(RestModule, Opts, #state{}),
+    % {ok, OldUniq, RestOldUniq} = decode_terms(RestOldIndex, Opts, #state{}),
+    % {ok, Pid, RestPid} = decode_terms(RestOldUniq, Opts, #state{}),
+    % {ok, FreeVars, RestFreeVars} = decode_terms(RestPid, Opts, #state{}),
+    % case {is_atom(ModuleName), is_integer(OldIndex), is_integer(OldUniq), is_pid(Pid)} of
+    %    {true, true, true, true} ->
+    %        {ok, {ModuleName, OldIndex, OldUniq, Pid, FreeVars}, Rest2};
+    %    Elsewise -> Elsewise
+    % end.
+    <<Fun:Size/binary, Rest2/binary>> = Data,
+    Term = binary_to_term(<<131, ?NEW_FUN_EXT, Fun/binary>>, [safe]),
+    {ok, Term, Rest2}.
+
+%%--------------------------------------------------------------------
+%% @hidden
 %% @doc
 %% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#map_ext
 %% @end
@@ -962,10 +997,26 @@ decode_map_ext2(Arity, Pairs, Opts, Buffer) ->
 %%--------------------------------------------------------------------
 %% @hidden
 %% @doc
+%% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#newer_reference_ext
+%% @end
+%%--------------------------------------------------------------------
+decode_newer_reference_ext(<<_Length:16/unsigned-integer, _Rest/binary>>, Opts) ->
+    {error, {not_supported, newer_reference_ext}}.
+
+%%--------------------------------------------------------------------
+%% @hidden
+%% @doc
 %% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#small_big_ext
 %% @end
 %%--------------------------------------------------------------------
-decode_small_big_ext(<<Size:8/unsigned-integer, Sign:8/unsigned-integer, Rest/binary>>, _Opts) ->
+decode_small_big_ext(<<Size:8/unsigned-integer, Sign:8/unsigned-integer, Rest/binary>>
+                    ,#{ large_big_ext := cursed } = _Opts) ->
+    <<Value:Size/binary, Rest2/binary>> = Rest,
+    Bignum = binary_to_term(<<131, ?SMALL_BIG_EXT, Size:8/unsigned-integer
+                             , Sign:8/unsigned-integer, Value:Size/binary>>, [safe]),
+    {ok, Bignum, Rest2};
+decode_small_big_ext(<<Size:8/unsigned-integer, Sign:8/unsigned-integer, Rest/binary>>, _Opts)
+  when Sign =:= 0 orelse Sign =:= 1 ->
     {ok, _Bignum, _Rest2} = decode_big_ext(Size, Sign, 0, Rest, []).
 
 %%--------------------------------------------------------------------
@@ -974,6 +1025,12 @@ decode_small_big_ext(<<Size:8/unsigned-integer, Sign:8/unsigned-integer, Rest/bi
 %% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#large_big_ext
 %% @end
 %%--------------------------------------------------------------------
+decode_large_big_ext(<<Size:32/unsigned-integer, Sign:8/unsigned-integer, Rest/binary>>
+                    ,#{ large_big_ext := cursed } = _Opts) ->
+    <<Value:Size/binary, Rest2/binary>> = Rest,
+    Bignum = binary_to_term(<<131, ?LARGE_BIG_EXT, Size:32/unsigned-integer
+                             , Sign:8/unsigned-integer, Value:Size/binary>>, [safe]),
+    {ok, Bignum, Rest2};
 decode_large_big_ext(<<Size:32/unsigned-integer, Sign:8/unsigned-integer, Rest/binary>>, _Opts) 
   when Sign =:= 0 orelse Sign =:= 1 ->
     {ok, _Bignum, _Rest2} = decode_big_ext(Size, Sign, 0, Rest, []).
@@ -1000,6 +1057,16 @@ decode_big_ext(Size, Sign, Counter, <<D:8/unsigned-integer, Rest/binary>>, Buffe
 pow(X, Y) -> pow(X, Y, 1).
 pow(_, 0, R) -> R;
 pow(X, Y, R) -> pow(X, Y-1, R*X).
+
+%%--------------------------------------------------------------------
+%% @hidden
+%% @doc 
+%% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#atom_cache_ref
+%% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#distribution-header
+%% @end
+%%--------------------------------------------------------------------
+decode_atom_cache_ref(<<AtomCacheRef:8/unsigned-integer, Rest/binary>>, Buffer) ->
+    {ok, AtomCacheRef, Rest}.
 
 %%--------------------------------------------------------------------
 %% @hidden
