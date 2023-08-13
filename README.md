@@ -222,3 +222,27 @@ to include:
 % ETF = {ok, #{ <<"data">> => [<<"test">>] }}.
 [<<"test">>] = path(ETF, "{ok,@}#!data").
 ```
+
+## Nothing to add?
+
+When I wrote [Serialization series — Do you speak Erlang ETF or BERT?
+(part
+1)](https://medium.com/@niamtokik/serialization-series-do-you-speak-erlang-etf-or-bert-part-1-ff70096b50c0)
+in 2017, someone told me to check another project called
+[`jem.js`](https://github.com/inaka/jem.js) and read [Replacing JSON
+when talking to Erlang](http://inaka.net/blog/2016/08/17/why-json/)
+([archive](https://web.archive.org/web/20180301221900/http://inaka.net/blog/2016/08/17/why-json/))
+blog post. What's funny here... Is that:
+
+```erlang
+handle_post(Req, State) ->
+  {ok, Body, Req1} = cowboy_req:body(Req),
+  Decoded = erlang:binary_to_term(Body),
+  Reply = do_whatever(Decoded),
+  {erlang:term_to_binary(Reply), Req1, State}.
+```
+
+Yes, "Faster and more efficient", but can destroy your whole platform
+in few second. Don't do that. Please. Unfortunately,
+[inaka.net](inaka.net) seems to be down, it would have been funny to
+play with that.
