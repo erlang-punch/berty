@@ -52,7 +52,7 @@
 %%% | LARGE_TUPLE_EXT     | 105 |  enabled | implemented
 %%% | LIST_EXT            | 108 |  enabled | implemented
 %%% | LOCAL_EXT           | 121 | disabled | todo
-%%% | MAP_EXT             | 116 |  enabled | todo
+%%% | MAP_EXT             | 116 |  enabled | partial (unstable)
 %%% | NEWER_REFERENCE_EXT |  90 | disabled | todo
 %%% | NEW_FLOAT_EXT       |  70 |  enabled | partial (unstable)
 %%% | NEW_FUN_EXT         | 112 | disabled | todo
@@ -184,6 +184,9 @@ decode(Data) ->
       Opts :: map(),
       Return :: {ok, term()}.
 
+decode(Data, #{ size_limit := Limit }) 
+  when size(Data) >= Limit ->
+    {error, {size_limit, size(Data)}};
 decode(Data, Opts) ->
     case decode_header(Data, Opts, #state{}) of
         {ok, Terms, <<>>} ->
@@ -364,6 +367,12 @@ decode_terms(<<?EXPORT_EXT, Rest/binary>>, #{ export_ext := enabled } = Opts, _B
     {ok, _Fun, _Rest2} = decode_export_ext(Rest, Opts);
 
 %---------------------------------------------------------------------
+% maps
+%---------------------------------------------------------------------
+decode_terms(<<?MAP_EXT, Rest/binary>>, Opts, _Buffer) ->
+    {ok, _Map, _Rest2} = decode_map_ext(Rest, Opts);
+
+%---------------------------------------------------------------------
 % wildcard pattern
 %---------------------------------------------------------------------
 decode_terms(<<Code, _/binary>>, _Opts, _Buffer) ->
@@ -513,6 +522,9 @@ decode_atoms(Binary, _) ->
       Opts :: map(),
       Return :: {ok, integer(), binary()}.
 
+% test function to create its own handler
+decode_small_integer_ext(<<Integer, Rest/binary>>, #{ small_integer_ext := {callback, Handler} }) ->
+    decode_handler(Handler, [Integer], Rest);
 decode_small_integer_ext(<<Integer, Rest/binary>>, Opts) ->
     ?LOG_DEBUG("~p", [{{decode_small_integer_ext, code(small_integer_ext)}, [Integer], Opts}]),
     {ok, Integer, Rest}.
@@ -934,15 +946,27 @@ decode_export_ext(Binary, Opts) ->
 %%--------------------------------------------------------------------
 %% @hidden
 %% @doc
+%% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#map_ext
+%% @end
+%%--------------------------------------------------------------------
+decode_map_ext(<<Arity:32/unsigned-integer, Pairs/binary>>, Opts) ->
+    decode_map_ext2(Arity, Pairs, Opts, #{}).
+
+decode_map_ext2(0, Rest, _Opts, Buffer) ->
+    {ok, Buffer, Rest};
+decode_map_ext2(Arity, Pairs, Opts, Buffer) ->
+    {ok, Key, Rest} = decode_terms(Pairs, Opts, #state{}),
+    {ok, Value, Rest2} = decode_terms(Rest, Opts, #state{}),
+    decode_map_ext2(Arity-1, Rest2, Opts, Buffer#{ Key => Value }).
+
+%%--------------------------------------------------------------------
+%% @hidden
+%% @doc
 %% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#small_big_ext
 %% @end
 %%--------------------------------------------------------------------
 decode_small_big_ext(<<Size:8/unsigned-integer, Sign:8/unsigned-integer, Rest/binary>>, _Opts) ->
-    {ok, Bignum, Rest2} = decode_big_ext(Size, 0, Rest, 0),
-    case Sign of
-        0 -> {ok, +Bignum, Rest2};
-        1 -> {ok, -Bignum, Rest2}
-    end.
+    {ok, _Bignum, _Rest2} = decode_big_ext(Size, Sign, 0, Rest, []).
 
 %%--------------------------------------------------------------------
 %% @hidden
@@ -950,22 +974,23 @@ decode_small_big_ext(<<Size:8/unsigned-integer, Sign:8/unsigned-integer, Rest/bi
 %% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#large_big_ext
 %% @end
 %%--------------------------------------------------------------------
-decode_large_big_ext(<<Size:32/unsigned-integer, Sign:8/unsigned-integer, Rest/binary>>, _Opts) ->
-    {ok, Bignum, Rest2} = decode_big_ext(Size, 0, Rest, 0),
-    case Sign of
-        0 -> {ok, +Bignum, Rest2};
-        1 -> {ok, -Bignum, Rest2}
-    end.
+decode_large_big_ext(<<Size:32/unsigned-integer, Sign:8/unsigned-integer, Rest/binary>>, _Opts) 
+  when Sign =:= 0 orelse Sign =:= 1 ->
+    {ok, _Bignum, _Rest2} = decode_big_ext(Size, Sign, 0, Rest, []).
 
 %%--------------------------------------------------------------------
 %% @hidden
 %% @doc main function to decode big integer.
 %% @end
 %%--------------------------------------------------------------------
-decode_big_ext(Size, Size, Rest, Bignum) ->
-    {ok, Bignum, Rest};
-decode_big_ext(Size, Counter, <<D:8/unsigned-integer, Rest/binary>>, Bignum) ->
-    decode_big_ext(Size, Counter+1, Rest, Bignum + (D*pow(256, Counter))).
+decode_big_ext(Size, Sign, Size, Rest, Buffer) ->
+    Bignum = lists:sum(Buffer),
+    case Sign of
+        0 -> {ok, +Bignum, Rest};
+        1 -> {ok, -Bignum, Rest}
+    end;
+decode_big_ext(Size, Sign, Counter, <<D:8/unsigned-integer, Rest/binary>>, Buffer) ->
+    decode_big_ext(Size, Sign, Counter+1, Rest, [(D*pow(256, Counter))|Buffer]).
 
 %%--------------------------------------------------------------------
 %% @hidden
@@ -975,6 +1000,28 @@ decode_big_ext(Size, Counter, <<D:8/unsigned-integer, Rest/binary>>, Bignum) ->
 pow(X, Y) -> pow(X, Y, 1).
 pow(_, 0, R) -> R;
 pow(X, Y, R) -> pow(X, Y-1, R*X).
+
+%%--------------------------------------------------------------------
+%% @hidden
+%% @doc custom handler function.
+%% @end
+%%--------------------------------------------------------------------
+decode_handler({Module, Function}, Args, Rest) ->
+    Result = apply(Module, Function, Args),
+    decode_handler_result(Result, Rest);
+decode_handler(Handler, Args, Rest) 
+  when is_function(Handler) ->
+    Result = apply(Handler, Args),
+    decode_handler_result(Result, Rest).
+
+%%--------------------------------------------------------------------
+%% @hidden
+%% @doc custom handler function.
+%% @end
+%%--------------------------------------------------------------------
+decode_handler_result({ok, Result}, Rest) -> {ok, Result, Rest};
+decode_handler_result({break, Result}, Rest) -> {ok, Result, Rest};
+decode_handler_result(Elsewise, _) -> Elsewise.
 
 %%--------------------------------------------------------------------
 %% @doc
