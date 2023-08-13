@@ -5,7 +5,17 @@ format inspired by Erlang ETF.
 
 ## Build
 
-    $ rebar3 compile
+```sh
+rebar3 compile
+rebar3 shell
+```
+
+## Test
+
+```sh
+rebar3 as test eunit
+rebar3 as test shell
+```
 
 # FAQ
 
@@ -133,7 +143,34 @@ avoided or carefully used.
 ## Why am I not aware of that?
 
 Few articles[^erlef-atom-exhaustion][^paraxial-atom-dos] have been
-created in the past to explain these problems.
+created in the past to explain these problems. On my side, if I was in
+charge of fixing this issue, I would probably do something in two
+times.
+
+In the first step, I would probably create a workaround on atom
+creation function, with a soft/hard limit. When we reach the soft
+limit, warnings are displayed saying we reached the soft limit, but we
+can still create new atoms. When reaching the hard limit, atoms can't
+be created anymore, and exceptions are raised instead of crashing the
+host.
+
+In a second step, I would probably create a flexible interface to
+deal with atoms and divide the problem in half:
+
+ 1. create fixed atom store containing only atoms from source code
+    (Erlang release and project), this one can't be increased.
+    
+ 2. create a second atom store containing dynamically created atoms
+    during runtime, this one can be increased.
+    
+What I worry about is when dealing with mnesia. What could happen if
+someone create more than 2M unwanted atoms added in Mnesia or DETS?
+What kind of behavior the cluster will have? And how to fix that if
+it's critical.
+    
+Unfortunately, I think it will totally break atom performance, but it
+could be an interesting project to learn how Erlang BEAM works under
+the hood.
 
 [^erlef-atom-exhaustion]: https://erlef.github.io/security-wg/secure_coding_and_deployment_hardening/atom_exhaustion.html
 [^paraxial-atom-dos]: https://paraxial.io/blog/atom-dos
