@@ -5,7 +5,13 @@
 %%%
 %%% == Usage ==
 %%%
+%%% ```
+%%% '''
+%%%
 %%% == Examples ==
+%%%
+%%% ```
+%%% '''
 %%%
 %%% @end
 %%%===================================================================
@@ -21,6 +27,9 @@
                , compressed = false
                , data = []
                , position = 0
+               , stats = #{}
+               , created_at = undefined
+               , stopped_at = undefined
                }).
 
 %---------------------------------------------------------------------
@@ -43,12 +52,12 @@
 -define( NEWER_REFERENCE_EXT,  90). % todo
 -define(       NEW_FLOAT_EXT,  70). % partial
 -define(         NEW_FUN_EXT, 112). % todo
--define(         NEW_PID_EXT,  88). % todo
--define(        NEW_PORT_EXT,  89). % todo
+-define(         NEW_PID_EXT,  88). % partial
+-define(        NEW_PORT_EXT,  89). % partial
 -define(   NEW_REFERENCE_EXT, 114). % todo
 -define(             NIL_EXT, 106). % implemented
--define(             PID_EXT, 103). % todo
--define(            PORT_EXT, 102). % todo
+-define(             PID_EXT, 103). % partial
+-define(            PORT_EXT, 102). % partial
 -define(       REFERENCE_EXT, 101). % todo (deprecated)
 -define(      SMALL_ATOM_EXT, 115). % implemented (deprecated)
 -define( SMALL_ATOM_UTF8_EXT, 119). % partial
@@ -71,7 +80,7 @@
 ?CODE( 97, small_integer_ext);
 ?CODE( 98, integer_ext);
 ?CODE( 99, float_ext);
-?CODE(100, atom_ref);
+?CODE(100, atom_ext);
 ?CODE(101, reference_ext);
 ?CODE(102, port_ext);
 ?CODE(103, pid_ext);
@@ -245,12 +254,12 @@ decode_terms(<<?LIST_EXT, Rest/binary>>, Opts, _Buffer) ->
 %---------------------------------------------------------------------
 % binary and bitstring
 %---------------------------------------------------------------------
-decode_terms(<<?BINARY_EXT, Rest/binary>>, #{ binary_ext := disabled }, _Buffer) ->
+decode_terms(<<?BINARY_EXT, _Rest/binary>>, #{ binary_ext := disabled }, _Buffer) ->
     {error, {binary_ext, disabeld}};
 decode_terms(<<?BINARY_EXT, Rest/binary>>, Opts, _Buffer) ->
     {ok, _Binary, _Rest2} = decode_binary_ext(Rest, Opts);
 
-decode_terms(<<?BIT_BINARY_EXT, Rest/binary>>, #{ bit_binary_ext := disabled }, _Buffer) ->
+decode_terms(<<?BIT_BINARY_EXT, _Rest/binary>>, #{ bit_binary_ext := disabled }, _Buffer) ->
     {error, {bit_binary_ext, disabled}};
 decode_terms(<<?BIT_BINARY_EXT, Rest/binary>>, Opts, _Buffer) ->
     {ok, _Bitstring, _Rest2} = decode_bit_binary_ext(Rest, Opts);
@@ -266,6 +275,15 @@ decode_terms(<<?NEW_PORT_EXT, Rest/binary>>, #{ new_port_ext := enabled } = Opts
 
 decode_terms(<<?V4_PORT_EXT, Rest/binary>>, #{ v4_port_ext := enabled } = Opts, _Buffer) ->
     {ok, _Port, _Rest2} = decode_v4_port_ext(Rest, Opts);
+
+%---------------------------------------------------------------------
+% pid
+%---------------------------------------------------------------------
+decode_terms(<<?PID_EXT, Rest/binary>>, #{ pid_ext := enabled } = Opts, _Buffer) ->
+    {ok, _Pid, _Rest2} = decode_pid_ext(Rest, Opts);
+
+decode_terms(<<?NEW_PID_EXT, Rest/binary>>, #{ new_pid_ext := enabled } = Opts, _Buffer) ->
+    {ok, _Pid, _Rest2} = decode_new_pid_ext(Rest, Opts);
 
 %---------------------------------------------------------------------
 % wildcard pattern
@@ -417,7 +435,8 @@ decode_atoms(Binary, _) ->
       Opts :: map(),
       Return :: {ok, integer(), binary()}.
 
-decode_small_integer_ext(<<Integer, Rest/binary>>, _Opts) ->
+decode_small_integer_ext(<<Integer, Rest/binary>>, Opts) ->
+    ?LOG_DEBUG("~p", [{{decode_small_integer_ext, code(small_integer_ext)}, [Integer], Opts}]),
     {ok, Integer, Rest}.
 
 decode_small_integer_ext_test() ->
@@ -447,7 +466,8 @@ decode_small_integer_ext_properties() ->
       Opts :: map(),
       Return :: {ok, integer(), binary()}.
 
-decode_integer_ext(<<Integer:32/signed-integer, Rest/binary>>, _Opts) ->
+decode_integer_ext(<<Integer:32/signed-integer, Rest/binary>>, Opts) ->
+    ?LOG_DEBUG("~p", [{{decode_integer_ext, code(integer_ext)}, [Integer], Opts}]),
     {ok, Integer, Rest}.
 
 decode_integer_ext_test() ->
@@ -469,6 +489,8 @@ decode_integer_ext_properties() ->
 %%--------------------------------------------------------------------
 %% @hidden
 %% @doc
+%%
+%% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#float_ext
 %% @end
 %%--------------------------------------------------------------------
 -spec decode_float_ext(Binary, Opts) -> Return when
@@ -476,8 +498,9 @@ decode_integer_ext_properties() ->
       Opts :: map(),
       Return :: {ok, float(), binary()}.
 
-decode_float_ext(<<Float:31/binary, Rest/binary>>, _Opts) ->
+decode_float_ext(<<Float:31/binary, Rest/binary>>, Opts) ->
     NewFloat = binary_to_float(Float),
+    ?LOG_DEBUG("~p", [{{decode_float_ext, code(float_ext)}, [Float], Opts}]),
     {ok, NewFloat, Rest}.
 
 decode_float_ext_test() ->
@@ -515,6 +538,8 @@ decode_new_float_ext(<<_Float:64/bitstring, _Rest/binary>>, _Opts) ->
 %%--------------------------------------------------------------------
 %% @hidden
 %% @doc
+%%
+%% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#atom_utf8_ext
 %% @end
 %%--------------------------------------------------------------------
 -spec decode_atom_utf8_ext(Binary, Opts) -> Return when
@@ -526,11 +551,14 @@ decode_new_float_ext(<<_Float:64/bitstring, _Rest/binary>>, _Opts) ->
 decode_atom_utf8_ext(<<Length:16/unsigned-integer, Rest/binary>>, Opts) ->
     <<Atom:Length/binary, Rest2/binary>> = Rest,
     NewAtom = decode_atoms(Atom, Opts),
+    ?LOG_DEBUG("~p", [{{decode_atom_utf8_ext, code(atom_utf8_ext)}, [Length, Atom, NewAtom], Opts}]),
     {ok, NewAtom, Rest2}.
 
 %%--------------------------------------------------------------------
 %% @hidden
 %% @doc
+%%
+%% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#small_atom_utf8_ext
 %% @end
 %%--------------------------------------------------------------------
 -spec decode_small_atom_utf8_ext(Binary, Opts) -> Return when
@@ -542,11 +570,14 @@ decode_atom_utf8_ext(<<Length:16/unsigned-integer, Rest/binary>>, Opts) ->
 decode_small_atom_utf8_ext(<<Length/unsigned-integer, Rest/binary>>, Opts) ->
     <<Atom:Length/binary, Rest2/binary>> = Rest,
     NewAtom = decode_atoms(Atom, Opts),
+    ?LOG_DEBUG("~p", [{{decode_small_atom_utf8_ext, code(small_atom_utf8_ext)}, [Length, Atom, NewAtom], Opts}]),
     {ok, NewAtom, Rest2}.
 
 %%--------------------------------------------------------------------
 %% @hidden
 %% @doc
+%%
+%% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#atom_ext--deprecated-
 %% @end
 %%--------------------------------------------------------------------
 -spec decode_atom_ext(Binary, Opts) -> Return when
@@ -558,11 +589,14 @@ decode_small_atom_utf8_ext(<<Length/unsigned-integer, Rest/binary>>, Opts) ->
 decode_atom_ext(<<Length:16/unsigned-integer, Rest/binary>>, Opts) ->
     <<Atom:Length/binary, Rest2/binary>> = Rest,
     NewAtom = decode_atoms(Atom, Opts),
+    ?LOG_DEBUG("~p", [{{decode_atom_ext, code(atom_ext)}, [Length, Atom, NewAtom], Opts}]),
     {ok, NewAtom, Rest2}.
 
 %%--------------------------------------------------------------------
 %% @hidden
 %% @doc
+%%
+%% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#small_atom_ext--deprecated-
 %% @end
 %%--------------------------------------------------------------------
 -spec decode_small_atom_ext(Binary, Opts) -> Return when
@@ -574,11 +608,14 @@ decode_atom_ext(<<Length:16/unsigned-integer, Rest/binary>>, Opts) ->
 decode_small_atom_ext(<<115, Length:8/unsigned-integer, Rest/binary>>, Opts) ->
     <<Atom:Length, Rest2/binary>> = Rest,
     NewAtom = decode_atoms(Atom, Opts),
+    ?LOG_DEBUG("~p", [{{decode_small_atom_ext, code(small_atom_ext)}, [Length, Atom, NewAtom], Opts}]),
     {ok, NewAtom, Rest2}.
 
 %%--------------------------------------------------------------------
 %% @hidden
-%% @doc
+%% @doc decode small_tuple_ext data.
+%%
+%% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#small_tuple_ext
 %% @end
 %%--------------------------------------------------------------------
 -spec decode_small_tuple_ext(Binary, Opts) -> Return when
@@ -591,16 +628,20 @@ decode_small_tuple_ext(<<0, Rest/binary>>, _Opts) ->
 decode_small_tuple_ext(<<Arity/unsigned-integer, Rest/binary>>, Opts) ->
     decode_small_tuple_ext2(Arity, Rest, Opts, []).
 
-decode_small_tuple_ext2(0, Rest, _Opts, Buffer) ->
+decode_small_tuple_ext2(0, Rest, Opts, Buffer) ->
     Tuple = erlang:list_to_tuple(lists:reverse(Buffer)),
+    ?LOG_DEBUG("~p", [{{decode_small_tuple_ext2, code(small_tuple_ext)}, [0, Tuple], Opts}]),
     {ok, Tuple, Rest};
 decode_small_tuple_ext2(Arity, Rest, Opts, Buffer) ->
     {ok, Term, Rest2} = decode_terms(Rest, Opts, #state{}),
+    ?LOG_DEBUG("~p", [{{decode_small_tuple_ext2, code(small_tuple_ext)}, [Arity, Term], Opts}]),
     decode_small_tuple_ext2(Arity-1, Rest2, Opts, [Term|Buffer]).
 
 %%--------------------------------------------------------------------
 %% @hidden
-%% @doc
+%% @doc decode large_tuple_ext data and all elements in it.
+%%
+%% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#large_tuple_ext
 %% @end
 %%--------------------------------------------------------------------
 -spec decode_large_tuple_ext(Binary, Opts) -> Return when
@@ -613,81 +654,182 @@ decode_large_tuple_ext(<<0:32, Rest/binary>>, _Opts) ->
 decode_large_tuple_ext(<<Arity:32/unsigned-integer, Rest/binary>>, Opts) ->
     decode_large_tuple_ext2(Arity, Rest, Opts, []).
 
-decode_large_tuple_ext2(0, Rest, _Opts, Buffer) ->
+decode_large_tuple_ext2(0, Rest, Opts, Buffer) ->
     Tuple = erlang:list_to_tuple(lists:reverse(Buffer)),
+    ?LOG_DEBUG("~p", [{{decode_large_tuple_ext2, code(large_tuple_ext)}, [0, Tuple], Opts}]),
     {ok, Tuple, Rest};
 decode_large_tuple_ext2(Arity, Rest, Opts, Buffer) ->
     {ok, Term, Rest2} = decode_terms(Rest, Opts, #state{}),
+    ?LOG_DEBUG("~p", [{{decode_large_tuple_ext2, code(large_tuple_ext)}, [Arity, Term], Opts}]),
     decode_large_tuple_ext2(Arity-1, Rest2, Opts, [Term|Buffer]).
 
 %%--------------------------------------------------------------------
 %% @hidden
-%% @doc
+%% @doc decode a serialized string_ext data.
+%%
+%% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#string_ext
 %% @end
 %%--------------------------------------------------------------------
 decode_string_ext(<<Length:16/unsigned-integer, Characters/binary>>, Opts) ->
     decode_string_ext2(Length, Characters, Opts, "").
 
-decode_string_ext2(0, Rest, _Opts, Buffer) ->
-    {ok, lists:reverse(Buffer), Rest};
+decode_string_ext2(0, Rest, Opts, Buffer) ->
+    String = lists:reverse(Buffer),
+    ?LOG_DEBUG("~p", [{{decode_string_ext2, code(string_ext)}, String, Opts}]),
+    {ok, String, Rest};
 decode_string_ext2(Length, <<Character:8/unsigned-integer, Rest/binary>>, Opts, Buffer) ->
     decode_string_ext2(Length-1, Rest, Opts, [Character|Buffer]).
 
 %%--------------------------------------------------------------------
 %% @hidden
-%% @doc
+%% @doc decode a serialized list_ext with all elements in it.
+%%
+%% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#list_ext
 %% @end
 %%--------------------------------------------------------------------
 decode_list_ext(<<Length:32/unsigned-integer, Elements/binary>>, Opts) ->
     {ok, List, <<106, Rest/binary>>} = decode_list_ext2(Length, Elements, Opts, []),
     {ok, List, Rest}.
 
-decode_list_ext2(0, Rest, _Opts, Buffer) ->
-    {ok, lists:reverse(Buffer), Rest};
+decode_list_ext2(0, Rest, Opts, Buffer) ->
+    List = lists:reverse(Buffer),
+    ?LOG_DEBUG("~p", [{{decode_list_ext2, code(list_ext)}, List, Opts}]),
+    {ok, List, Rest};
 decode_list_ext2(Length, Elements, Opts, Buffer) ->
     {ok, Term, Rest} = decode_terms(Elements, Opts, #state{}),
     decode_list_ext2(Length-1, Rest, Opts, [Term|Buffer]).
 
 %%--------------------------------------------------------------------
 %% @hidden
-%% @doc
+%% @doc decode a serialized binary_ext data.
+%%
+%% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#binary_ext
 %% @end
 %%--------------------------------------------------------------------
 decode_binary_ext(<<Length:32/unsigned-integer, Rest/binary>>, Opts) ->
     <<Binary:Length/binary, Rest2/binary>> = Rest,
+    ?LOG_DEBUG("~p", [{{decode_binary_ext, code(binary_ext)}, [Length, Binary], Opts}]),
     {ok, Binary, Rest2}.
 
 %%--------------------------------------------------------------------
 %% @hidden
-%% @doc
+%% @doc decode a serialized bit_binary_ext data.
+%%
+%% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#bit_binary_ext
 %% @end
 %%--------------------------------------------------------------------
 decode_bit_binary_ext(<<Length:32/unsigned-integer, Bits:8, Rest/binary>>, Opts) ->
     <<Binary:(Length-1)/binary, Byte:1/binary, Rest2/binary>> = Rest,
+    ?LOG_DEBUG("~p", [{{decode_bit_binary_ext, code(bit_binary_ext)}, [Length, Bits, Binary, Byte], Opts}]),
     {ok, <<Binary/binary, Byte:Bits/bitstring>>, Rest2}.
 
 %%--------------------------------------------------------------------
 %% @hidden
-%% @doc
+%% @doc decode a serialized port_ext data. Avoid using it in prod.
+%%
+%% This function is disabled by default. It has been added simply to
+%% offer a complete ETF implementation.
+%%
+%% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#port_ext
 %% @end
 %%--------------------------------------------------------------------
 decode_port_ext(Binary, Opts) ->
-    {ok, Atom, Rest} = decode_terms(Binary, Opts, #state{}),
-    <<ID:32/unsigned-integer, Creation:1/binary, Rest2/binary>> = Rest,
-    StringPort = lists:flatten(io_lib:format("#Port<~B.~B>", [Creation,ID])),
-    {tofix, list_to_port(StringPort), Rest2}.
+    {ok, Atom, Rest} = decode_terms(Binary, Opts#{ atoms => create }, #state{}),
+    case is_atom(Atom) of
+        true ->
+            <<ID:32/unsigned-integer, Creation:1/binary, Rest2/binary>> = Rest,
+            StringPort = lists:flatten(io_lib:format("#Port<~B.~B>", [Creation,ID])),
+            {tofix, list_to_port(StringPort), Rest2};
+       false ->
+            {error, {not_atom, Atom}}
+    end.
 
+%%--------------------------------------------------------------------
+%% @hidden
+%% @doc decode a serialized new_port_ext data. Avoid using it in prod.
+%%
+%% This function is disabled by default. It has been added simply to
+%% offer a complete ETF implementation.
+%%
+%% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#new_port_ext
+%% @end
+%%--------------------------------------------------------------------
 decode_new_port_ext(Binary, Opts) ->
-    {ok, Atom, Rest} = decode_terms(Binary, Opts, #state{}),
-    <<ID:32/unsigned-integer, Creation:32/unsigned-integer, Rest2/binary>> = Rest,
-    StringPort = lists:flatten(io_lib:format("#Port<~B.~B>", [Creation,ID])),
-    {tofix, list_to_port(StringPort), Rest2}.
+    {ok, Atom, Rest} = decode_terms(Binary, Opts#{ atoms => create }, #state{}),
+    case is_atom(Atom) of
+        true ->
+            <<ID:32/unsigned-integer, Creation:32/unsigned-integer, Rest2/binary>> = Rest,
+            StringPort = lists:flatten(io_lib:format("#Port<~B.~B>", [Creation,ID])),
+            {tofix, list_to_port(StringPort), Rest2};
+       false ->
+            {error, {not_atom, Atom}}
+    end.
 
+%%--------------------------------------------------------------------
+%% @hidden
+%% @doc decode a serialized decode_v4_port_ext data. Avoid using it in
+%% prod.
+%%
+%% This function is disabled by default. It has been added simply to
+%% offer a complete ETF implementation.
+%%
+%% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#v4_port_ext
+%% @end
+%%--------------------------------------------------------------------
 decode_v4_port_ext(Binary, Opts) ->
-    {ok, Atom, Rest} = decode_terms(Binary, Opts, #state{}),
-    <<ID:64/unsigned-integer, Creation:32/unsigned-integer, Rest2/binary>> = Rest,
-    StringPort = lists:flatten(io_lib:format("#Port<~B.~B>", [Creation,ID])),
-    {tofix, list_to_port(StringPort), Rest2}.
+    {ok, Atom, Rest} = decode_terms(Binary, Opts#{ atoms => create }, #state{}),
+    case is_atom(Atom) of
+        true ->
+            <<ID:64/unsigned-integer, Creation:32/unsigned-integer, Rest2/binary>> = Rest,
+            StringPort = lists:flatten(io_lib:format("#Port<~B.~B>", [Creation,ID])),
+            {tofix, list_to_port(StringPort), Rest2};
+       false ->
+            {error, {not_atom, Atom}}
+    end.
+
+%%--------------------------------------------------------------------
+%% @hidden
+%% @doc decode a serialized pid_ext data. Avoid using it in prod.
+%%
+%% This function is disabled by default. It has been added simply to
+%% offer a complete ETF implementation.
+%%
+%% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#pid_ext
+%% @end
+%%--------------------------------------------------------------------
+decode_pid_ext(Binary, Opts) ->
+    {ok, NodeName, Rest} = decode_terms(Binary, Opts#{ atoms => create }, #state{}),
+    case is_atom(NodeName) of
+        true ->
+            <<ID:32/unsigned-integer, Serial:32/unsigned-integer
+             ,Creation:8/unsigned-integer, Rest2/binary>> = Rest,
+            Pid = c:pid(Creation, ID, Serial),
+            {ok, Pid, Rest2};
+       false -> 
+            {error, {not_atom, NodeName}}
+    end.
+
+%%--------------------------------------------------------------------
+%% @hidden
+%% @doc decode a serialized new_pid_ext data. Avoid using it in prod.
+%%
+%% This function is disabled by default. It has been added simply to
+%% offer a complete ETF implementation.
+%%
+%% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#new_pid_ext
+%% @end
+%%--------------------------------------------------------------------
+decode_new_pid_ext(Binary, Opts) ->
+    {ok, NodeName, Rest} = decode_terms(Binary, Opts#{ atoms => create }, #state{}),
+    case is_atom(NodeName) of
+        true ->
+            <<ID:32/unsigned-integer, Serial:32/unsigned-integer
+             ,Creation:32/unsigned-integer, Rest2/binary>> = Rest,
+            Pid = c:pid(Creation, ID, Serial),
+            {ok, Pid, Rest2};
+       false -> 
+            {error, {not_atom, NodeName}}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -700,5 +842,5 @@ encode(Data) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-encode(_Data, _Opts) ->
-    ok.
+encode(Data, _Opts) ->
+    {ok, erlang:term_to_binary(Data)}.
