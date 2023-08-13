@@ -175,6 +175,48 @@ the hood.
 [^erlef-atom-exhaustion]: https://erlef.github.io/security-wg/secure_coding_and_deployment_hardening/atom_exhaustion.html
 [^paraxial-atom-dos]: https://paraxial.io/blog/atom-dos
 
+## Are atoms the only issue there?
+
+Well, it depends. If you are receving a (very) long string or list
+containing terms, it will have a direct impact on the memory, and it
+will eventually lead to memory exhaustion:
+
+```erlang
+% size of the list should be checked
+% if not, memory exhaustion can happen
+[ $1 || _ <- lists:seq(0,160_000_000) ].
+% eheap_alloc: Cannot allocate 3936326656 bytes of memory (of type "heap").
+% Crash dump is being written to: erl_crash.dump...
+```
+
+Same behavior can be generated using binaries:
+
+```erlang
+% big binaries can crash the BEAM
+binary_to_term(<<131, 111, 4294967294:32/unsigned-integer, 0:8/integer, 255:8, 0:4294967280/unsigned-integer>>).
+% binary_alloc: Cannot allocate 4294967293 bytes of memory (of type "binary").
+% Crash dump is being written to: erl_crash.dump...
+```
+
+Finally, generating ETF payload with very long binaries can also have
+an impact on CPUs, the following code can generate DoS and if many process 
+
+```erlang
+% big payload, high cpu usage, no crash.
+% size of the big integer must be checked
+% size: 2**18-1, binary byte size: 262_150 (~262kB)
+_ = binary_to_term(<<131, 111, 262_143:32/unsigned-integer, 0:8/integer, 255:2_097_144/unsigned-integer>>).
+
+% size: 2**19-1, binary byte size: 524_294 (~524kB)
+_ = binary_to_term(<<131, 111, 524_287:32/unsigned-integer, 0:8/integer, 255:4_194_296/unsigned-integer>>).
+
+% size: 2**20-1, binary byte size: 1_048_582 (~1MB)
+_ = binary_to_term(<<131, 111, 1_048_575:32/unsigned-integer, 0:8/integer, 255:8_388_600/unsigned-integer>>).
+```
+
+It's highly probable other terms can have a deadly impact on a node or
+a cluster.
+
 ## How to fix the root cause?
 
 The problem is from atoms, at least one
