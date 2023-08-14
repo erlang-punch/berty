@@ -12,6 +12,7 @@
                , module = ?MODULE 
                , started_at = undefined
                , ended_at = undefined
+               , depth = 0
                }).
 
 %%--------------------------------------------------------------------
@@ -108,6 +109,9 @@ decode(<<First:8/unsigned-integer, _/binary>> = Data, Opts, #state{ module = Mod
 %% @hidden
 %% @doc
 %% @end
+%%
+%% depth => {Min, Max}
+%% size => {Min, Max}
 %%--------------------------------------------------------------------
 
 %---------------------------------------------------------------------
@@ -233,7 +237,7 @@ decode(atom_utf8_ext, <<?ATOM_UTF8_EXT, Length:16/unsigned-integer, Rest/binary>
 decode(small_tuple_ext, <<?SMALL_TUPLE_EXT, 0/unsigned-integer, Rest/binary>>, Opts, State) -> 
     {ok, {}, Rest};
 decode(small_tuple_ext, <<?SMALL_TUPLE_EXT, Arity/unsigned-integer, Rest/binary>>, Opts, State) -> 
-    decode_tuple_ext(Arity, Rest, Opts);
+    decode_tuple_ext(Arity, Rest, Opts, State);
 
 %---------------------------------------------------------------------
 % large_tuple_ext => enabled | disabled | {callback, Callback}
@@ -243,7 +247,7 @@ decode(small_tuple_ext, <<?SMALL_TUPLE_EXT, Arity/unsigned-integer, Rest/binary>
 decode(large_tuple_ext, <<?LARGE_TUPLE_EXT, 0:32/unsigned-integer, Rest/binary>>, Opts, State) -> 
     {ok, {}, Rest};
 decode(large_tuple_ext, <<?LARGE_TUPLE_EXT, Arity:32/unsigned-integer, Rest/binary>>, Opts, State) -> 
-    decode_tuple_ext(Arity, Rest, Opts);
+    decode_tuple_ext(Arity, Rest, Opts, State);
 
 %---------------------------------------------------------------------
 % string_ext => enabled | disabled | {callback, Callback}
@@ -251,7 +255,7 @@ decode(large_tuple_ext, <<?LARGE_TUPLE_EXT, Arity:32/unsigned-integer, Rest/bina
 % string_ext_options => #{} % overwrite main options
 %---------------------------------------------------------------------
 decode(string_ext, <<?STRING_EXT, Length:16/unsigned-integer, Rest/binary>>, Opts, State) -> 
-    decode_string_ext(Length, Rest, Opts);
+    decode_string_ext(Length, Rest, Opts, State);
 
 %---------------------------------------------------------------------
 % nil_ext => enabled | disabled | {callback, Callback}
@@ -265,7 +269,7 @@ decode(nil_ext, <<?NIL_EXT, Rest/binary>>, Opts, State) ->
 % list_ext_options = #{} % overwrite main options
 %---------------------------------------------------------------------
 decode(list_ext, <<?LIST_EXT, Length:32/unsigned-integer, Rest/binary>>, Opts, State) ->
-    decode_list_ext(Length, Rest, Opts);
+    decode_list_ext(Length, Rest, Opts, State);
 
 %---------------------------------------------------------------------
 % binary_ext => enabled | disabled | {callback, Callback}
@@ -290,7 +294,7 @@ decode(bit_binary_ext, <<?BIT_BINARY_EXT, Size:32/unsigned-integer, Bits:8, Rest
 % map_ext_value_options => #{} % overwrite main options
 %---------------------------------------------------------------------
 decode(map_ext, <<?MAP_EXT, Arity:32/unsigned-integer, Rest/binary>>, Opts, State) ->
-    decode_map_ext(Arity, Rest, Opts);
+    decode_map_ext(Arity, Rest, Opts, State);
 
 %---------------------------------------------------------------------
 % Wildcard Pattern
@@ -349,51 +353,55 @@ decode_atoms(Binary, _) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-decode_tuple_ext(Arity, Rest, Opts) ->
-    decode_tuple_ext(Arity, Rest, Opts, []).
-decode_tuple_ext(0, Rest, Opts, Buffer) ->
+decode_tuple_ext(Arity, Rest, Opts, State) ->
+    ?LOG_DEBUG("~p", [{decode_tuple_ext, Arity, Opts, State}]),
+    decode_tuple_ext(Arity, Rest, Opts, State#state{ depth = State#state.depth+1 }, []).
+decode_tuple_ext(0, Rest, Opts, State, Buffer) ->
     {ok, list_to_tuple(lists:reverse(Buffer)), Rest};
-decode_tuple_ext(Arity, Rest, Opts, Buffer) ->
+decode_tuple_ext(Arity, Rest, Opts, State, Buffer) ->
     {ok, Term, Rest2} = decode(Rest, Opts, #state{}),
-    decode_tuple_ext(Arity-1, Rest2, Opts, [Term|Buffer]).
+    decode_tuple_ext(Arity-1, Rest2, Opts, State, [Term|Buffer]).
     
 %%--------------------------------------------------------------------
 %% @hidden
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-decode_string_ext(Length, Rest, Opts) ->
-    decode_string_ext(Length, Rest, Opts, []).
-decode_string_ext(0, Rest, Opts, Buffer) ->
+decode_string_ext(Length, Rest, Opts, State) ->
+    ?LOG_DEBUG("~p", [{decode_string_ext, Length, Opts, State}]),
+    decode_string_ext(Length, Rest, Opts, State#state{ depth = State#state.depth+1 }, []).
+decode_string_ext(0, Rest, Opts, State, Buffer) ->
     {ok, lists:reverse(Buffer), Rest};
-decode_string_ext(Length, <<Character:8/unsigned-integer, Rest/binary>>, Opts, Buffer) ->
-    decode_string_ext(Length-1, Rest, Opts, [Character|Buffer]).
+decode_string_ext(Length, <<Character:8/unsigned-integer, Rest/binary>>, Opts, State, Buffer) ->
+    decode_string_ext(Length-1, Rest, Opts, State, [Character|Buffer]).
 
 %%--------------------------------------------------------------------
 %% @hidden
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-decode_list_ext(Length, Elements, Opts) ->
-    decode_list_ext(Length, Elements, Opts, []).
-decode_list_ext(0, Rest, Opts, Buffer) ->
-    {ok, [], Rest2} = decode(nil_ext, Rest, Opts, #state{}),
+decode_list_ext(Length, Elements, Opts, State) ->
+    ?LOG_DEBUG("~p", [{decode_list_ext, Length, Opts, State}]),
+    decode_list_ext(Length, Elements, Opts, State#state{ depth = State#state.depth+1 }, []).
+decode_list_ext(0, Rest, Opts, State, Buffer) ->
+    {ok, [], Rest2} = decode(nil_ext, Rest, Opts, State),
     {ok, lists:reverse(Buffer), Rest2};
-decode_list_ext(Length, Rest, Opts, Buffer) ->
-    {ok, Term, Rest2} = decode(Rest, Opts, #state{}),
-    decode_list_ext(Length-1, Rest2, Opts, [Term|Buffer]).
+decode_list_ext(Length, Rest, Opts, State, Buffer) ->
+    {ok, Term, Rest2} = decode(Rest, Opts, State),
+    decode_list_ext(Length-1, Rest2, Opts, State, [Term|Buffer]).
 
 %%--------------------------------------------------------------------
 %% @hidden
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-decode_map_ext(Arity, Rest, Opts) ->
-    decode_map_ext(Arity, Rest, Opts, #{}).
-decode_map_ext(0, Rest, Opts, Buffer) ->
+decode_map_ext(Arity, Rest, Opts, State) ->
+    ?LOG_DEBUG("~p", [{decode_map_ext, Arity, Opts, State}]),
+    decode_map_ext(Arity, Rest, Opts, State#state{ depth = State#state.depth+1 }, #{}).
+decode_map_ext(0, Rest, Opts, State, Buffer) ->
     {ok, Buffer, Rest};
-decode_map_ext(Arity, Rest, Opts, Buffer) ->
+decode_map_ext(Arity, Rest, Opts, State, Buffer) ->
     {ok, Key, RestKey} = decode(Rest, Opts, #state{}),
     {ok, Value, RestValue} = decode(RestKey, Opts, #state{}),
-    decode_map_ext(Arity-1, RestValue, Opts, Buffer#{ Key => Value }).
+    decode_map_ext(Arity-1, RestValue, Opts, State, Buffer#{ Key => Value }).
 
