@@ -51,18 +51,48 @@
 ?CODE(121, local_ext);
 code(Elsewise) -> Elsewise.
 
+default_options() ->
+    #{ small_integer_ext => enabled
+     , atom_utf8_ext => enabled
+     , integer_ext => enabled
+     , float_ext => enabled
+     , new_float_ext => enabled
+     , atom_utf8_ext => enabled
+     , atom_ext => enabled
+     , small_atom_ext => enabled
+     , small_atom_utf8_ext => enabled
+     , atom_utf8_ext => enabled
+     , small_tuple_ext => enabled
+     , small_tuple_ext_arity => {0, 255}
+     , large_tuple_ext => enabled
+     , large_tuple_ext_arity => {0, 1024}
+     , string_ext => enabled
+     , string_ext_length => {0, 65535}
+     , nil_ext => enabled
+     , list_ext => enabled
+     , list_ext_length => {0, 1048576}
+     , binary_ext => enabled
+     , bit_binary_ext => enabled
+     , map_ext => enabled
+     , map_ext_length => {0, 65535}
+     % , map_ext_key_terms => [binary_ext, string_ext, ...]
+     % , map_ext_value_terms => [any]
+     }.
 
 %%--------------------------------------------------------------------
 %%
 %%--------------------------------------------------------------------
-decode(Data) -> decode(Data, #{}).
+decode(Data) -> 
+    decode(Data, default_options()).
 
 %%--------------------------------------------------------------------
 %%
 %%--------------------------------------------------------------------
-decode(<<131, Data/binary>>, Opts) -> 
+decode(<<131, Data/binary>> = Payload, Opts) -> 
     State = #state{ started_at = erlang:monotonic_time() },
-    case decode(Data, Opts, State) of
+    DefaultOpts = default_options(),
+    NewOpts = maps:merge(DefaultOpts, Opts),
+    case decode(Data, NewOpts, State) of
         {ok, Term, <<>>} -> {ok, Term};
         Elsewise -> Elsewise
     end.
@@ -87,7 +117,7 @@ decode(<<First:8/unsigned-integer, _/binary>> = Data, Opts, #state{ module = Mod
 decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/signed-integer, Rest/binary>>, #{ small_integer_ext := cursed } = _Opts, _State) ->
     Result = binary_to_term(<<131, ?SMALL_INTEGER_EXT, Integer/integer>>, [safe]),
     {ok, Result, Rest};
-decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/signed-integer, Rest/binary>>, _Opts, _State) ->
+decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/signed-integer, Rest/binary>>, Opts, _State) ->
     {ok, Integer, Rest};
 
 %---------------------------------------------------------------------
@@ -200,45 +230,58 @@ decode(atom_utf8_ext, <<?ATOM_UTF8_EXT, Length:16/unsigned-integer, Rest/binary>
 % small_tuple_ext_arity => {Min, Max}
 % small_tuple_ext_options => #{} % overwrite main options
 %---------------------------------------------------------------------
-decode(small_tuple_ext, <<?SMALL_TUPLE_EXT, Rest/binary>>, Opts, State) -> {error, unsupported};
+decode(small_tuple_ext, <<?SMALL_TUPLE_EXT, 0/unsigned-integer, Rest/binary>>, Opts, State) -> 
+    {ok, {}, Rest};
+decode(small_tuple_ext, <<?SMALL_TUPLE_EXT, Arity/unsigned-integer, Rest/binary>>, Opts, State) -> 
+    decode_tuple_ext(Arity, Rest, Opts);
 
 %---------------------------------------------------------------------
 % large_tuple_ext => enabled | disabled | {callback, Callback}
 % large_tuple_ext_arity => {Min, Max}
 % large_tuple_ext_options => #{} % overwrite main options
 %---------------------------------------------------------------------
-decode(large_tuple_ext, <<?LARGE_TUPLE_EXT, Rest/binary>>, Opts, State) -> {error, unsupported};
+decode(large_tuple_ext, <<?LARGE_TUPLE_EXT, 0:32/unsigned-integer, Rest/binary>>, Opts, State) -> 
+    {ok, {}, Rest};
+decode(large_tuple_ext, <<?LARGE_TUPLE_EXT, Arity:32/unsigned-integer, Rest/binary>>, Opts, State) -> 
+    decode_tuple_ext(Arity, Rest, Opts);
 
 %---------------------------------------------------------------------
 % string_ext => enabled | disabled | {callback, Callback}
 % string_ext_length => {Min, Max}
 % string_ext_options => #{} % overwrite main options
 %---------------------------------------------------------------------
-decode(string_ext, <<?STRING_EXT, Rest/binary>>, Opts, State) -> {error, unsupported};
+decode(string_ext, <<?STRING_EXT, Length:16/unsigned-integer, Rest/binary>>, Opts, State) -> 
+    decode_string_ext(Length, Rest, Opts);
 
 %---------------------------------------------------------------------
 % nil_ext => enabled | disabled | {callback, Callback}
 %---------------------------------------------------------------------
-decode(nil_ext, <<?NIL_EXT, Rest/binary>>, Opts, State) -> {error, unsupported};
+decode(nil_ext, <<?NIL_EXT, Rest/binary>>, Opts, State) -> 
+    {ok, [], Rest};
 
 %---------------------------------------------------------------------
 % list_ext => enabled | disabled | {callback, Callback}
 % list_ext_length => {Min, Max}
 % list_ext_options = #{} % overwrite main options
 %---------------------------------------------------------------------
-decode(list_ext, <<?LIST_EXT, Rest/binary>>, Opts, State) -> {error, unsupported};
+decode(list_ext, <<?LIST_EXT, Length:32/unsigned-integer, Rest/binary>>, Opts, State) ->
+    decode_list_ext(Length, Rest, Opts);
 
 %---------------------------------------------------------------------
 % binary_ext => enabled | disabled | {callback, Callback}
 % binary_ext_size => {Min, Max}
 %---------------------------------------------------------------------
-decode(binary_ext, <<?BINARY_EXT, Rest/binary>>, Opts, State) -> {error, unsupported};
+decode(binary_ext, <<?BINARY_EXT, Size:32/unsigned-integer, Rest/binary>>, Opts, State) ->
+    <<Binary:Size/binary, Rest2/binary>> = Rest,
+    {ok, Binary, Rest2};
 
 %---------------------------------------------------------------------
 % bit_binary_ext => enabled | disabled | {callback, Callback}
 % bit_binary_ext_size => {Min, Max}
 %---------------------------------------------------------------------
-decode(bit_binary_ext, <<?BIT_BINARY_EXT, Rest/binary>>, Opts, State) -> {error, unsupported};
+decode(bit_binary_ext, <<?BIT_BINARY_EXT, Size:32/unsigned-integer, Bits:8, Rest/binary>>, Opts, State) ->
+    <<Binary:(Size-1)/binary, Byte:1/binary, Rest2/binary>> = Rest,
+    {ok, <<Binary/binary, Byte:Bits/bitstring>>, Rest2};
 
 %---------------------------------------------------------------------
 % map_ext => enabled | disabled | {callback, Callback}
@@ -246,13 +289,18 @@ decode(bit_binary_ext, <<?BIT_BINARY_EXT, Rest/binary>>, Opts, State) -> {error,
 % map_ext_key_options => #{} % overwrite main options
 % map_ext_value_options => #{} % overwrite main options
 %---------------------------------------------------------------------
-decode(map_ext, <<?MAP_EXT, Rest/binary>>, Opts, State) -> {error, unsupported};
+decode(map_ext, <<?MAP_EXT, Arity:32/unsigned-integer, Rest/binary>>, Opts, State) ->
+    decode_map_ext(Arity, Rest, Opts);
 
 %---------------------------------------------------------------------
-%
+% Wildcard Pattern
 %---------------------------------------------------------------------
-decode(Parser,_,_,_) ->
-    {error, {unsupported, Parser}}.
+decode(Parser, Rest, Opts, State) ->
+    {error, [{reason, "unsupporter parser"}
+            ,{parser, Parser}
+            ,{rest, Rest}
+            ,{opts, Opts},
+             {state, State}]}.
 
 %%--------------------------------------------------------------------
 %% @hidden
@@ -295,3 +343,57 @@ decode_atoms(Binary, #{ atoms := existing }) ->
     end;
 decode_atoms(Binary, _) ->
     Binary.
+
+%%--------------------------------------------------------------------
+%% @hidden
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+decode_tuple_ext(Arity, Rest, Opts) ->
+    decode_tuple_ext(Arity, Rest, Opts, []).
+decode_tuple_ext(0, Rest, Opts, Buffer) ->
+    {ok, list_to_tuple(lists:reverse(Buffer)), Rest};
+decode_tuple_ext(Arity, Rest, Opts, Buffer) ->
+    {ok, Term, Rest2} = decode(Rest, Opts, #state{}),
+    decode_tuple_ext(Arity-1, Rest2, Opts, [Term|Buffer]).
+    
+%%--------------------------------------------------------------------
+%% @hidden
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+decode_string_ext(Length, Rest, Opts) ->
+    decode_string_ext(Length, Rest, Opts, []).
+decode_string_ext(0, Rest, Opts, Buffer) ->
+    {ok, lists:reverse(Buffer), Rest};
+decode_string_ext(Length, <<Character:8/unsigned-integer, Rest/binary>>, Opts, Buffer) ->
+    decode_string_ext(Length-1, Rest, Opts, [Character|Buffer]).
+
+%%--------------------------------------------------------------------
+%% @hidden
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+decode_list_ext(Length, Elements, Opts) ->
+    decode_list_ext(Length, Elements, Opts, []).
+decode_list_ext(0, Rest, Opts, Buffer) ->
+    {ok, [], Rest2} = decode(nil_ext, Rest, Opts, #state{}),
+    {ok, lists:reverse(Buffer), Rest2};
+decode_list_ext(Length, Rest, Opts, Buffer) ->
+    {ok, Term, Rest2} = decode(Rest, Opts, #state{}),
+    decode_list_ext(Length-1, Rest2, Opts, [Term|Buffer]).
+
+%%--------------------------------------------------------------------
+%% @hidden
+%% @doc
+%% @end
+%%--------------------------------------------------------------------
+decode_map_ext(Arity, Rest, Opts) ->
+    decode_map_ext(Arity, Rest, Opts, #{}).
+decode_map_ext(0, Rest, Opts, Buffer) ->
+    {ok, Buffer, Rest};
+decode_map_ext(Arity, Rest, Opts, Buffer) ->
+    {ok, Key, RestKey} = decode(Rest, Opts, #state{}),
+    {ok, Value, RestValue} = decode(RestKey, Opts, #state{}),
+    decode_map_ext(Arity-1, RestValue, Opts, Buffer#{ Key => Value }).
+
