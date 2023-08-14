@@ -5,14 +5,16 @@
 %%% @end
 %%%===================================================================
 -module(berty2).
--compile(export_all).
+-export([default_options/0]).
+-export([decode/1, decode/2]).
 -include("berty.hrl").
 -include_lib("kernel/include/logger.hrl").
 -record(state, { id = make_ref()
-               , module = ?MODULE 
+               , module = ?MODULE
                , started_at = undefined
                , ended_at = undefined
                , depth = 0
+               , metric_process = berty_metrics
                }).
 
 %%--------------------------------------------------------------------
@@ -54,7 +56,6 @@ code(Elsewise) -> Elsewise.
 
 default_options() ->
     #{ small_integer_ext => enabled
-     , atom_utf8_ext => enabled
      , integer_ext => enabled
      , float_ext => enabled
      , new_float_ext => enabled
@@ -62,7 +63,6 @@ default_options() ->
      , atom_ext => enabled
      , small_atom_ext => enabled
      , small_atom_utf8_ext => enabled
-     , atom_utf8_ext => enabled
      , small_tuple_ext => enabled
      , small_tuple_ext_arity => {0, 255}
      , large_tuple_ext => enabled
@@ -80,16 +80,47 @@ default_options() ->
      % , map_ext_value_terms => [any]
      }.
 
+-type callback_option() :: function() | atom().
+-type limit_option() :: {number(), number()}.
+-type small_integer_ext_option() :: enabled | disabled | {callback, callback_option()}.
+-type small_integer_ext_limit_option() :: limit_option().
+-type integer_ext_option() ::  enabled | disabled | {callback, callback_option()}.
+-type integer_ext_limit_option() :: limit_option().
+-type float_ext_option() ::  enabled | disabled | cursed | {callback, callback_option()}.
+-type float_ext_limit_option() :: limit_option().
+-type options() :: #{ small_integer_ext => small_integer_ext_option()
+                    , small_integer_ext_limit => small_integer_ext_limit_option()
+                    , integer_ext => integer_ext_option()
+                    , integer_ext_limit => integer_ext_limit_option()
+                    , float_ext => float_ext_option()
+                    , float_ext_limit => float_ext_limit_option()
+                    }.
+
 %%--------------------------------------------------------------------
 %%
 %%--------------------------------------------------------------------
-decode(Data) -> 
+-spec decode(Data) -> Return when
+      Data :: binary(),
+      Return :: {ok, term()} 
+              | {ok, term(), binary()} 
+              | {error, Reason},
+      Reason :: proplists:proplist().
+      
+decode(Data) ->
     decode(Data, default_options()).
 
 %%--------------------------------------------------------------------
 %%
 %%--------------------------------------------------------------------
-decode(<<131, Data/binary>> = Payload, Opts) -> 
+-spec decode(Data, Opts) -> Return when
+      Data :: binary(),
+      Return :: {ok, term()} 
+              | {ok, term(), binary()} 
+              | {error, Reason},
+      Opts :: options(),
+      Reason :: proplists:proplist().
+
+decode(<<131, Data/binary>> = _Payload, Opts) ->
     State = #state{ started_at = erlang:monotonic_time() },
     DefaultOpts = default_options(),
     NewOpts = maps:merge(DefaultOpts, Opts),
@@ -99,11 +130,18 @@ decode(<<131, Data/binary>> = Payload, Opts) ->
     end.
 
 %%--------------------------------------------------------------------
-%%
+%% @hidden
+%% @doc
+%% @end
 %%--------------------------------------------------------------------
 decode(<<First:8/unsigned-integer, _/binary>> = Data, Opts, #state{ module = Module } = State) ->
     Parser = code(First),
-    Module:decode(Parser, Data, Opts, State).
+    case Module =:= ?MODULE of
+        true ->
+            decode(Parser, Data, Opts, State);
+        false ->
+            Module:decode(Parser, Data, Opts, State)
+    end.
 
 %%--------------------------------------------------------------------
 %% @hidden
@@ -118,28 +156,27 @@ decode(<<First:8/unsigned-integer, _/binary>> = Data, Opts, #state{ module = Mod
 % small_integer_ext => enabled | disabled | {callback, Callback}
 % small_integer_ext_limit => {Min, Max}
 %---------------------------------------------------------------------
-decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/signed-integer, Rest/binary>>, #{ small_integer_ext := cursed } = _Opts, _State) ->
-    Result = binary_to_term(<<131, ?SMALL_INTEGER_EXT, Integer/integer>>, [safe]),
+decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/signed-integer, Rest/binary>>, #{ small_integer_ext := cursed }, _State) ->
+    Result = ?BINARY_TO_TERM(<<131, ?SMALL_INTEGER_EXT, Integer/integer>>),
     {ok, Result, Rest};
-decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/signed-integer, Rest/binary>>, Opts, _State) ->
+decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/signed-integer, Rest/binary>>, _, _State) ->
     {ok, Integer, Rest};
 
 %---------------------------------------------------------------------
 % integer_ext => enabled | disabled | {callback, Callback}
 % integer_ext_limit => {Min, Max}
 %---------------------------------------------------------------------
-decode(integer_ext, <<?INTEGER_EXT, Integer:32/signed-integer, Rest/binary>>, _Opts, _State) ->
+decode(integer_ext, <<?INTEGER_EXT, Integer:32/signed-integer, Rest/binary>>, _, _State) ->
     {ok, Integer, Rest};
 
 %---------------------------------------------------------------------
 % float_ext => enabled | disabled | cursed | {callback, Callback}
 % float_ext_limit => {Min, Max}
 %---------------------------------------------------------------------
-decode(float_ext, <<?FLOAT_EXT, Float:31/binary, Rest/binary>>, #{ minor_version := 0
-                                                                 , float_ext := cursed } = _Opts, _State) ->
-    Result = binary_to_term(<<131, ?FLOAT_EXT, Float:31/binary>>, [safe]),
+decode(float_ext, <<?FLOAT_EXT, Float:31/binary, Rest/binary>>, #{ minor_version := 0, float_ext := cursed }, _State) ->
+    Result = ?BINARY_TO_TERM(<<131, ?FLOAT_EXT, Float:31/binary>>),
     {ok, Result, Rest};
-decode(float_ext, <<?FLOAT_EXT, Float:31/binary, Rest/binary>>, #{ minor_version := 0 } = _Opts, _State) ->
+decode(float_ext, <<?FLOAT_EXT, Float:31/binary, Rest/binary>>, #{ minor_version := 0 }, _State) ->
     NewFloat = binary_to_float(Float),
     {ok, NewFloat, Rest};
 
@@ -147,29 +184,22 @@ decode(float_ext, <<?FLOAT_EXT, Float:31/binary, Rest/binary>>, #{ minor_version
 % new_float_ext => enabled | disabled | cursed | {callback, Callback}
 % new_float_ext_limit => {Min, Max}
 %---------------------------------------------------------------------
-decode(new_float_ext, <<?NEW_FLOAT_EXT, Float:8/binary, Rest/binary>>, #{ new_float_ext := cursed } = Opts, _State) ->
-    Result = binary_to_term(<<131, ?NEW_FLOAT_EXT, Float/binary>>),
+decode(new_float_ext, <<?NEW_FLOAT_EXT, Float:8/binary, Rest/binary>>, #{ new_float_ext := cursed }, _State) ->
+    Result = ?BINARY_TO_TERM(<<131, ?NEW_FLOAT_EXT, Float/binary>>),
     {ok, Result, Rest};
-
-%---------------------------------------------------------------------
-% atom_utf8_ext => disabled | enabled | cursed | {callback, Callback}
-% atom_utf8_ext_size => {Min, Max}
-%---------------------------------------------------------------------
-decode(atom_cache_ref, <<?ATOM_CACHE_REF, Rest/binary>>, _, _) -> 
-    {error, {unsupported, atom_cache_ref}};
 
 %---------------------------------------------------------------------
 % atom_ext => enabled | disabled | cursed | {callback, Callback}
 % atom_ext_size => {Min, Max}
 %---------------------------------------------------------------------
-decode(atom_ext, <<?ATOM_EXT, Length:16/unsigned-integer, Rest/binary>>, #{ atom_ext := disabled } = _Opts, _State) ->
+decode(atom_ext, <<?ATOM_EXT, Length:16/unsigned-integer, Rest/binary>>, #{ atom_ext := disabled }, _State) ->
     <<_Atom:Length/binary, Rest2/binary>> = Rest,
     {next, Rest2};
-decode(atom_ext, <<?ATOM_EXT, Length:16/unsigned-integer, Rest/binary>>, #{ atom_ext := cursed } = _Opts, _State) ->
+decode(atom_ext, <<?ATOM_EXT, Length:16/unsigned-integer, Rest/binary>>, #{ atom_ext := cursed }, _State) ->
     <<Atom:Length/binary, Rest2/binary>> = Rest,
-    NewAtom = binary_to_term(<<131, ?ATOM_EXT, Length:16/unsigned-integer, Atom:Length/binary>>, [safe]),
+    NewAtom = ?BINARY_TO_TERM(<<131, ?ATOM_EXT, Length:16/unsigned-integer, Atom:Length/binary>>),
     {ok, NewAtom, Rest2};
-decode(atom_ext, <<?ATOM_EXT, Length:16/unsigned-integer, Rest/binary>>, Opts, _State) -> 
+decode(atom_ext, <<?ATOM_EXT, Length:16/unsigned-integer, Rest/binary>>, Opts, _State) ->
     <<Atom:Length/binary, Rest2/binary>> = Rest,
     NewAtom = decode_atoms(Atom, Opts),
     {ok, NewAtom, Rest2};
@@ -178,14 +208,14 @@ decode(atom_ext, <<?ATOM_EXT, Length:16/unsigned-integer, Rest/binary>>, Opts, _
 % small_atom_ext => enabled | disabled | cursed | {callback, Callback}
 % small_atom_ext_size => {Min, Max}
 %---------------------------------------------------------------------
-decode(small_atom_ext, <<?SMALL_ATOM_EXT, Length:8/unsigned-integer, Rest/binary>>, #{ small_atom_ext := disabled } = Opts, State) -> 
+decode(small_atom_ext, <<?SMALL_ATOM_EXT, Length:8/unsigned-integer, Rest/binary>>, #{ small_atom_ext := disabled }, _State) ->
     <<_Atom:Length, Rest2/binary>> = Rest,
     {next, Rest2};
-decode(small_atom_ext, <<?SMALL_ATOM_EXT, Length:8/unsigned-integer, Rest/binary>>, #{ small_atom_ext := cursed } = Opts, State) -> 
+decode(small_atom_ext, <<?SMALL_ATOM_EXT, Length:8/unsigned-integer, Rest/binary>>, #{ small_atom_ext := cursed }, _State) ->
     <<Atom:Length, Rest2/binary>> = Rest,
-    NewAtom = binary_to_term(<<131, ?SMALL_ATOM_EXT, Length:8/unsigned-integer, Atom:Length/binary>>),
+    NewAtom = ?BINARY_TO_TERM(<<131, ?SMALL_ATOM_EXT, Length:8/unsigned-integer, Atom:Length/binary>>),
     {ok, NewAtom, Rest2};
-decode(small_atom_ext, <<?SMALL_ATOM_EXT, Length:8/unsigned-integer, Rest/binary>>, Opts, State) -> 
+decode(small_atom_ext, <<?SMALL_ATOM_EXT, Length:8/unsigned-integer, Rest/binary>>, Opts, _State) ->
     <<Atom:Length, Rest2/binary>> = Rest,
     NewAtom = decode_atoms(Atom, Opts),
     {ok, NewAtom, Rest2};
@@ -194,14 +224,14 @@ decode(small_atom_ext, <<?SMALL_ATOM_EXT, Length:8/unsigned-integer, Rest/binary
 % small_atom_utf8_ext => enabled | disabled | cursed | {callback, Callback}
 % small_atom_utf8_ext_size => {Min, Max}
 %---------------------------------------------------------------------
-decode(small_atom_utf8_ext, <<?SMALL_ATOM_UTF8_EXT, Length:8/unsigned-integer, Rest/binary>>, #{ small_atom_utf8_ext := disabled } = Opts, _State) -> 
+decode(small_atom_utf8_ext, <<?SMALL_ATOM_UTF8_EXT, Length:8/unsigned-integer, Rest/binary>>, #{ small_atom_utf8_ext := disabled }, _State) ->
     <<_Atom:Length/binary, Rest2/binary>> = Rest,
     {next, Rest2};
-decode(small_atom_utf8_ext, <<?SMALL_ATOM_UTF8_EXT, Length:8/unsigned-integer, Rest/binary>>, #{ small_atom_utf8_ext := cursed } = Opts, _State) -> 
+decode(small_atom_utf8_ext, <<?SMALL_ATOM_UTF8_EXT, Length:8/unsigned-integer, Rest/binary>>, #{ small_atom_utf8_ext := cursed }, _State) ->
     <<Atom:Length/binary, Rest2/binary>> = Rest,
-    NewAtom = binary_to_term(<<131, ?SMALL_ATOM_UTF8_EXT, Length:8/unsigned-integer, Atom:Length/binary>>, [safe]),
-    {ok, NewAtom, Rest2};    
-decode(small_atom_utf8_ext, <<?SMALL_ATOM_UTF8_EXT, Length:8/unsigned-integer, Rest/binary>>, Opts, _State) -> 
+    NewAtom = ?BINARY_TO_TERM(<<131, ?SMALL_ATOM_UTF8_EXT, Length:8/unsigned-integer, Atom:Length/binary>>),
+    {ok, NewAtom, Rest2};
+decode(small_atom_utf8_ext, <<?SMALL_ATOM_UTF8_EXT, Length:8/unsigned-integer, Rest/binary>>, Opts, _State) ->
     <<Atom:Length/binary, Rest2/binary>> = Rest,
     NewAtom = decode_atoms(Atom, Opts),
     {ok, NewAtom, Rest2};
@@ -217,14 +247,14 @@ decode(small_atom_utf8_ext, <<?SMALL_ATOM_UTF8_EXT, Length:8/unsigned-integer, R
 % atom_utf8_ext => enabled | disabled | cursed | {callback, Callback}
 % atom_utf8_ext_size => {Min, Max}
 %---------------------------------------------------------------------
-decode(atom_utf8_ext, <<?ATOM_UTF8_EXT, Length:16/unsigned-integer, Rest/binary>>, #{ atom_utf8_ext := disabled } = Opts, _State) -> 
+decode(atom_utf8_ext, <<?ATOM_UTF8_EXT, Length:16/unsigned-integer, Rest/binary>>, #{ atom_utf8_ext := disabled }, _State) ->
     <<_Atom:Length/binary, Rest2/binary>> = Rest,
     {next, Rest2};
-decode(atom_utf8_ext, <<?ATOM_UTF8_EXT, Length:16/unsigned-integer, Rest/binary>>, #{ atom_utf8_ext := cursed } = Opts, _State) -> 
+decode(atom_utf8_ext, <<?ATOM_UTF8_EXT, Length:16/unsigned-integer, Rest/binary>>, #{ atom_utf8_ext := cursed }, _State) ->
     <<Atom:Length/binary, Rest2/binary>> = Rest,
-    NewAtom = binary_to_term(<<131, ?ATOM_UTF8_EXT, Length:16/unsigned-integer, Atom:Length/binary>>, [safe]),
+    NewAtom = ?BINARY_TO_TERM(<<131, ?ATOM_UTF8_EXT, Length:16/unsigned-integer, Atom:Length/binary>>),
     {ok, NewAtom, Rest2};
-decode(atom_utf8_ext, <<?ATOM_UTF8_EXT, Length:16/unsigned-integer, Rest/binary>>, Opts, _State) -> 
+decode(atom_utf8_ext, <<?ATOM_UTF8_EXT, Length:16/unsigned-integer, Rest/binary>>, Opts, _State) ->
     <<Atom:Length/binary, Rest2/binary>> = Rest,
     NewAtom = decode_atoms(Atom, Opts),
     {ok, NewAtom, Rest2};
@@ -234,9 +264,9 @@ decode(atom_utf8_ext, <<?ATOM_UTF8_EXT, Length:16/unsigned-integer, Rest/binary>
 % small_tuple_ext_arity => {Min, Max}
 % small_tuple_ext_options => #{} % overwrite main options
 %---------------------------------------------------------------------
-decode(small_tuple_ext, <<?SMALL_TUPLE_EXT, 0/unsigned-integer, Rest/binary>>, Opts, State) -> 
+decode(small_tuple_ext, <<?SMALL_TUPLE_EXT, 0/unsigned-integer, Rest/binary>>, _, _State) ->
     {ok, {}, Rest};
-decode(small_tuple_ext, <<?SMALL_TUPLE_EXT, Arity/unsigned-integer, Rest/binary>>, Opts, State) -> 
+decode(small_tuple_ext, <<?SMALL_TUPLE_EXT, Arity/unsigned-integer, Rest/binary>>, Opts, State) ->
     decode_tuple_ext(Arity, Rest, Opts, State);
 
 %---------------------------------------------------------------------
@@ -244,9 +274,9 @@ decode(small_tuple_ext, <<?SMALL_TUPLE_EXT, Arity/unsigned-integer, Rest/binary>
 % large_tuple_ext_arity => {Min, Max}
 % large_tuple_ext_options => #{} % overwrite main options
 %---------------------------------------------------------------------
-decode(large_tuple_ext, <<?LARGE_TUPLE_EXT, 0:32/unsigned-integer, Rest/binary>>, Opts, State) -> 
+decode(large_tuple_ext, <<?LARGE_TUPLE_EXT, 0:32/unsigned-integer, Rest/binary>>, _, _State) ->
     {ok, {}, Rest};
-decode(large_tuple_ext, <<?LARGE_TUPLE_EXT, Arity:32/unsigned-integer, Rest/binary>>, Opts, State) -> 
+decode(large_tuple_ext, <<?LARGE_TUPLE_EXT, Arity:32/unsigned-integer, Rest/binary>>, Opts, State) ->
     decode_tuple_ext(Arity, Rest, Opts, State);
 
 %---------------------------------------------------------------------
@@ -254,13 +284,15 @@ decode(large_tuple_ext, <<?LARGE_TUPLE_EXT, Arity:32/unsigned-integer, Rest/bina
 % string_ext_length => {Min, Max}
 % string_ext_options => #{} % overwrite main options
 %---------------------------------------------------------------------
-decode(string_ext, <<?STRING_EXT, Length:16/unsigned-integer, Rest/binary>>, Opts, State) -> 
+decode(string_ext, <<?STRING_EXT, 0:16/unsigned-integer, Rest/binary>>, _Opts, _State) ->
+    {ok, "", Rest};
+decode(string_ext, <<?STRING_EXT, Length:16/unsigned-integer, Rest/binary>>, Opts, State) ->
     decode_string_ext(Length, Rest, Opts, State);
 
 %---------------------------------------------------------------------
 % nil_ext => enabled | disabled | {callback, Callback}
 %---------------------------------------------------------------------
-decode(nil_ext, <<?NIL_EXT, Rest/binary>>, Opts, State) -> 
+decode(nil_ext, <<?NIL_EXT, Rest/binary>>, _Opts, _State) ->
     {ok, [], Rest};
 
 %---------------------------------------------------------------------
@@ -268,14 +300,20 @@ decode(nil_ext, <<?NIL_EXT, Rest/binary>>, Opts, State) ->
 % list_ext_length => {Min, Max}
 % list_ext_options = #{} % overwrite main options
 %---------------------------------------------------------------------
+decode(list_ext, <<?LIST_EXT, 0:32/unsigned-integer, Rest/binary>>, _Opts, _State) ->
+    {ok, [], Rest};
 decode(list_ext, <<?LIST_EXT, Length:32/unsigned-integer, Rest/binary>>, Opts, State) ->
     decode_list_ext(Length, Rest, Opts, State);
 
 %---------------------------------------------------------------------
-% binary_ext => enabled | disabled | {callback, Callback}
+% binary_ext => enabled | disabled | cursed | {callback, Callback}
 % binary_ext_size => {Min, Max}
 %---------------------------------------------------------------------
-decode(binary_ext, <<?BINARY_EXT, Size:32/unsigned-integer, Rest/binary>>, Opts, State) ->
+decode(binary_ext, <<?BINARY_EXT, Size:32/unsigned-integer, Rest/binary>>, #{ binary_ext := cursed } = _Opts, _State) ->
+    <<Binary:Size/binary, Rest2/binary>> = Rest,
+    CursedBinary = ?BINARY_TO_TERM(<<131, ?BINARY_EXT, Size:32/unsigned-integer, Binary:Size/binary>>),
+    {ok, CursedBinary, Rest2};
+decode(binary_ext, <<?BINARY_EXT, Size:32/unsigned-integer, Rest/binary>>, _Opts, _State) ->
     <<Binary:Size/binary, Rest2/binary>> = Rest,
     {ok, Binary, Rest2};
 
@@ -283,7 +321,12 @@ decode(binary_ext, <<?BINARY_EXT, Size:32/unsigned-integer, Rest/binary>>, Opts,
 % bit_binary_ext => enabled | disabled | {callback, Callback}
 % bit_binary_ext_size => {Min, Max}
 %---------------------------------------------------------------------
-decode(bit_binary_ext, <<?BIT_BINARY_EXT, Size:32/unsigned-integer, Bits:8, Rest/binary>>, Opts, State) ->
+decode(bit_binary_ext, <<?BIT_BINARY_EXT, Size:32/unsigned-integer, Bits:8, Rest/binary>>, #{ bit_binary_ext := cursed } = _Opts, _State) ->
+    <<Binary:(Size-1)/binary, Byte:1/binary, Rest2/binary>> = Rest,
+    Cursed = <<131, ?BIT_BINARY_EXT, Size:32/unsigned-integer, Bits:8, Binary:(Size-1)/binary, Byte:1/binary>>,
+    CursedBits = ?BINARY_TO_TERM(Cursed),
+    {ok, CursedBits, Rest2};
+decode(bit_binary_ext, <<?BIT_BINARY_EXT, Size:32/unsigned-integer, Bits:8, Rest/binary>>, _Opts, _State) ->
     <<Binary:(Size-1)/binary, Byte:1/binary, Rest2/binary>> = Rest,
     {ok, <<Binary/binary, Byte:Bits/bitstring>>, Rest2};
 
@@ -311,7 +354,7 @@ decode(Parser, Rest, Opts, State) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-decode_atoms(Binary, #{ atoms := {whitelist, Whitelist} })
+decode_atoms(Binary, #{ atoms := {whitelist, Whitelist }})
   when is_list(Whitelist) ->
     case lists:member(Binary, Whitelist) of
         true ->
@@ -356,12 +399,15 @@ decode_atoms(Binary, _) ->
 decode_tuple_ext(Arity, Rest, Opts, State) ->
     ?LOG_DEBUG("~p", [{decode_tuple_ext, Arity, Opts, State}]),
     decode_tuple_ext(Arity, Rest, Opts, State#state{ depth = State#state.depth+1 }, []).
-decode_tuple_ext(0, Rest, Opts, State, Buffer) ->
+
+decode_tuple_ext(0, Rest, _Opts, #{ tuple_ext := disabled } = _State, _Buffer) ->
+    {next, Rest};
+decode_tuple_ext(0, Rest, _Opts, _State, Buffer) ->
     {ok, list_to_tuple(lists:reverse(Buffer)), Rest};
 decode_tuple_ext(Arity, Rest, Opts, State, Buffer) ->
     {ok, Term, Rest2} = decode(Rest, Opts, #state{}),
     decode_tuple_ext(Arity-1, Rest2, Opts, State, [Term|Buffer]).
-    
+
 %%--------------------------------------------------------------------
 %% @hidden
 %% @doc
@@ -370,7 +416,10 @@ decode_tuple_ext(Arity, Rest, Opts, State, Buffer) ->
 decode_string_ext(Length, Rest, Opts, State) ->
     ?LOG_DEBUG("~p", [{decode_string_ext, Length, Opts, State}]),
     decode_string_ext(Length, Rest, Opts, State#state{ depth = State#state.depth+1 }, []).
-decode_string_ext(0, Rest, Opts, State, Buffer) ->
+
+decode_string_ext(0, Rest, #{ string_ext := disabled } = _Opts, _State, _Buffer) ->
+    {next, Rest};
+decode_string_ext(0, Rest, _Opts, _State, Buffer) ->
     {ok, lists:reverse(Buffer), Rest};
 decode_string_ext(Length, <<Character:8/unsigned-integer, Rest/binary>>, Opts, State, Buffer) ->
     decode_string_ext(Length-1, Rest, Opts, State, [Character|Buffer]).
@@ -383,6 +432,10 @@ decode_string_ext(Length, <<Character:8/unsigned-integer, Rest/binary>>, Opts, S
 decode_list_ext(Length, Elements, Opts, State) ->
     ?LOG_DEBUG("~p", [{decode_list_ext, Length, Opts, State}]),
     decode_list_ext(Length, Elements, Opts, State#state{ depth = State#state.depth+1 }, []).
+
+decode_list_ext(0, Rest, Opts, #{ list_ext := disabled } = State, _Buffer) ->
+    {ok, [], Rest2} = decode(nil_ext, Rest, Opts, State),
+    {next, Rest2};
 decode_list_ext(0, Rest, Opts, State, Buffer) ->
     {ok, [], Rest2} = decode(nil_ext, Rest, Opts, State),
     {ok, lists:reverse(Buffer), Rest2};
@@ -398,10 +451,12 @@ decode_list_ext(Length, Rest, Opts, State, Buffer) ->
 decode_map_ext(Arity, Rest, Opts, State) ->
     ?LOG_DEBUG("~p", [{decode_map_ext, Arity, Opts, State}]),
     decode_map_ext(Arity, Rest, Opts, State#state{ depth = State#state.depth+1 }, #{}).
-decode_map_ext(0, Rest, Opts, State, Buffer) ->
+
+decode_map_ext(0, Rest, #{ decode_map_ext := disabled } = _Opts, _State, _Buffer) ->
+    {next, Rest};
+decode_map_ext(0, Rest, _Opts, _State, Buffer) ->
     {ok, Buffer, Rest};
 decode_map_ext(Arity, Rest, Opts, State, Buffer) ->
     {ok, Key, RestKey} = decode(Rest, Opts, #state{}),
     {ok, Value, RestValue} = decode(RestKey, Opts, #state{}),
     decode_map_ext(Arity-1, RestValue, Opts, State, Buffer#{ Key => Value }).
-
