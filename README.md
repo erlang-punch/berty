@@ -1,5 +1,13 @@
 # berty
 
+![Erlang Punch Berty License](https://img.shields.io/github/license/erlang-punch/berty)
+![Erlang Punch Berty Top Language](https://img.shields.io/github/languages/top/erlang-punch/berty)
+![Erlang Punch Berty Workflow Status (main branch)](https://img.shields.io/github/actions/workflow/status/erlang-punch/berty/test.yaml?branch=main)
+![Erlang Punch Berty Last Commit](https://img.shields.io/github/last-commit/erlang-punch/berty)
+![Erlang Punch Berty Code Size (bytes)](https://img.shields.io/github/languages/code-size/erlang-punch/berty)
+![Erlang Punch Berty Repository File Count](https://img.shields.io/github/directory-file-count/erlang-punch/berty)
+![Erlang Punch Berty Repository Size](https://img.shields.io/github/repo-size/erlang-punch/berty)
+
 A clean, safe and flexible implementation of BERT, a data-structure
 format inspired by Erlang ETF.
 
@@ -57,7 +65,7 @@ few examples:
  - keep our own local atom table containing all atom deserialized. A
    soft/hard limit can be set.
 
-## How really? Is it serious?
+## Oh?  really? Is it serious?
 
 In fact, a simple solution already exists, using the option `safe` or
 `used` when using
