@@ -198,7 +198,7 @@ binary_to_term(<<131, 111, 4294967294:32/unsigned-integer, 0:8/integer, 255:8, 0
 % Crash dump is being written to: erl_crash.dump...
 ```
 
-Finally, generating ETF payload with very long binaries can also have
+Generating ETF payload with very long binaries can also have
 an impact on CPUs, the following code can generate DoS and if many process 
 
 ```erlang
@@ -212,6 +212,18 @@ _ = binary_to_term(<<131, 111, 524_287:32/unsigned-integer, 0:8/integer, 255:4_1
 
 % size: 2**20-1, binary byte size: 1_048_582 (~1MB)
 _ = binary_to_term(<<131, 111, 1_048_575:32/unsigned-integer, 0:8/integer, 255:8_388_600/unsigned-integer>>).
+```
+
+Creating a long node name can crash the VM during startup, because the
+name of the node is encoded using an `atom_ext` term, encoded on 255
+bits. If the name of the node is greater than 255, it crashes.
+
+```sh
+erl -sname $(pwgen -A0 252 1)
+# Crash dump is being written to: erl_crash.dump...done
+
+erl -name $(pwgen -A0 246 1)@localhost
+# Crash dump is being written to: erl_crash.dump...done
 ```
 
 It's highly probable other terms can have a deadly impact on a node or

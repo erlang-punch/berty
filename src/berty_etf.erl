@@ -4,7 +4,7 @@
 %%% @doc
 %%% @end
 %%%===================================================================
--module(berty2).
+-module(berty_etf).
 -export([default_options/0]).
 -export([decode/1, decode/2]).
 -include("berty.hrl").
@@ -80,20 +80,40 @@ default_options() ->
      % , map_ext_value_terms => [any]
      }.
 
--type callback_option() :: function() | atom().
+-type callback_option() :: {callback, function() | atom()}.
 -type limit_option() :: {number(), number()}.
--type small_integer_ext_option() :: enabled | disabled | {callback, callback_option()}.
+-type small_integer_ext_option() :: enabled | disabled | callback_option().
 -type small_integer_ext_limit_option() :: limit_option().
--type integer_ext_option() ::  enabled | disabled | {callback, callback_option()}.
+-type integer_ext_option() ::  enabled | disabled | callback_option().
 -type integer_ext_limit_option() :: limit_option().
--type float_ext_option() ::  enabled | disabled | cursed | {callback, callback_option()}.
+-type float_ext_option() ::  enabled | disabled | cursed | callback_option().
 -type float_ext_limit_option() :: limit_option().
+-type new_float_ext_option() ::  enabled | disabled | cursed | callback_option().
+-type new_float_ext_limit_option() :: limit_option().
+-type atom_ext_option() :: enabled | disabled | cursed | callback_option().
+-type atom_ext_size_option() :: limit_option().
+-type small_atom_ext_option() ::  enabled | disabled | cursed | callback_option().
+-type small_atom_ext_size_option() :: limit_option().
+-type atoms_option() :: create 
+                      | {create, number()} 
+                      | {create, number(), warning}
+                      | as_string
+                      | as_binary
+                      | existing.
+
 -type options() :: #{ small_integer_ext => small_integer_ext_option()
                     , small_integer_ext_limit => small_integer_ext_limit_option()
                     , integer_ext => integer_ext_option()
                     , integer_ext_limit => integer_ext_limit_option()
                     , float_ext => float_ext_option()
                     , float_ext_limit => float_ext_limit_option()
+                    , new_float_ext => new_float_ext_option()
+                    , new_float_ext_limit => new_float_ext_limit_option()
+                    , atom_ext => atom_ext_option()
+                    , atom_ext_size => atom_ext_size_option()
+                    , small_atom_ext => small_atom_ext_option()
+                    , small_atom_ext_size => small_atom_ext_size_option()
+                    , atoms => atoms_option()
                     }.
 
 %%--------------------------------------------------------------------
@@ -338,6 +358,93 @@ decode(bit_binary_ext, <<?BIT_BINARY_EXT, Size:32/unsigned-integer, Bits:8, Rest
 %---------------------------------------------------------------------
 decode(map_ext, <<?MAP_EXT, Arity:32/unsigned-integer, Rest/binary>>, Opts, State) ->
     decode_map_ext(Arity, Rest, Opts, State);
+
+%---------------------------------------------------------------------
+%
+%---------------------------------------------------------------------
+decode(port_ext, <<?PORT_EXT, Rest/binary>>, #{ port_ext := cursed } = Opts, State) ->
+    {ok, _Node, Rest2} = decode(atom_ext, Rest, Opts#{ atoms => create }, State),
+    <<Id:32/unsigned-integer, Creation:8/unsigned-integer, Rest3/binary>> = Rest2,
+    Format = io_lib:format("#Port<~B.~B>", [Creation,Id]),
+    StringPort = lists:flatten(Format),
+    {ok, list_to_port(StringPort), Rest3};
+
+%---------------------------------------------------------------------
+%
+%---------------------------------------------------------------------
+decode(new_port_ext, <<?NEW_PORT_EXT, Rest/binary>>, #{ new_port_ext := cursed } = Opts, State) ->
+    {ok, _Node, Rest2} = decode(atom_ext, Rest, Opts#{ atoms => create }, State),
+    <<Id:32/unsigned-integer, Creation:32/unsigned-integer, Rest3/binary>> = Rest2,
+    Format = io_lib:format("#Port<~B.~B>", [Creation,Id]),
+    StringPort = lists:flatten(Format),
+    {ok, list_to_port(StringPort), Rest3};
+
+%---------------------------------------------------------------------
+%
+%---------------------------------------------------------------------
+decode(v4_port_ext, <<?V4_PORT_EXT, Rest/binary>>, #{ v4_port_ext := cursed } = Opts, State) ->
+    {ok, _Node, Rest2} = decode(atom_ext, Rest, Opts#{ atoms => create }, State),
+    <<Id:64/unsigned-integer, Creation:32/unsigned-integer, Rest3/binary>> = Rest2,
+    Format = io_lib:format("#Port<~B.~B>", [Creation,Id]),
+    StringPort = lists:flatten(Format),
+    {ok, list_to_port(StringPort), Rest3};
+
+%---------------------------------------------------------------------
+%
+%---------------------------------------------------------------------
+decode(pid_ext, <<?PID_EXT, Rest/binary>>, #{ pid_ext := cursed } = Opts, State) ->
+    {ok, _Node, Rest2} = decode(atom_ext, Rest, Opts#{ atoms => create }, State),
+    <<ID:32/unsigned-integer, Serial:32/unsigned-integer
+     ,Creation:8/unsigned-integer, Rest3/binary>> = Rest2,
+    Pid = c:pid(Creation, ID, Serial),
+    {ok, Pid, Rest3};
+
+%---------------------------------------------------------------------
+%
+%---------------------------------------------------------------------
+decode(new_pid_ext, <<?NEW_PID_EXT, Rest/binary>>
+      ,#{ new_pid_ext := cursed } = Opts, State) ->
+    {ok, _Node, Rest2} = decode(atom_ext, Rest, Opts#{ atoms => create }, State),
+    <<ID:32/unsigned-integer, Serial:32/unsigned-integer
+     ,Creation:32/unsigned-integer, Rest3/binary>> = Rest2,
+    Pid = c:pid(Creation, ID, Serial),
+    {ok, Pid, Rest3};
+
+%---------------------------------------------------------------------
+% @todo to be tested
+%---------------------------------------------------------------------
+decode(reference_ext, <<?REFERENCE_EXT, Rest/binary>>
+      ,#{ reference_ext := cursed } = Opts, State) ->
+    {ok, Node, Rest2} = decode(atom_ext, Rest, Opts#{ atoms => create }, State),
+    <<ID:32/unsigned-integer, Creation:8/unsigned-integer, Rest3/binary>> = Rest2,
+    {error, Node, ID, Creation};
+
+%---------------------------------------------------------------------
+% @todo to be tested
+%---------------------------------------------------------------------
+decode(new_reference_ext, <<?NEW_REFERENCE_EXT, Length:16/unsigned-integer, Rest/binary>>
+      ,#{ new_reference_ext := cursed } = Opts, State) ->
+    {ok, Node, Rest2} = decode(atom_ext, Rest, Opts#{ atoms => create }, State),
+    <<Creation:8/unsigned-integer, Rest3/binary>> = Rest2,
+    <<IDs:(4*Length)/binary, Rest4/binary>> = Rest3,
+    IDSeq = lists:reverse([ ID || <<ID:32/unsigned-integer>> <= IDs ]),
+    Format = io_lib:format("#Ref<~B.~B.~B.~B>", [Creation|IDSeq]),
+    RefString = lists:flatten(Format),
+    {ok, list_to_ref(RefString), Rest4};
+
+
+%---------------------------------------------------------------------
+% @todo to cleanup this mess
+%---------------------------------------------------------------------
+decode(newer_reference_ext, <<?NEWER_REFERENCE_EXT, Length:16/unsigned-integer, Rest/binary>>
+      ,#{ newer_reference_ext := cursed } = Opts, State) ->
+    {ok, Node, Rest2} = decode(atom_ext, Rest, Opts#{ atoms => create }, State),
+    <<Creation:32/unsigned-integer, Rest3/binary>> = Rest2,
+    <<IDs:(4*Length)/binary, Rest4/binary>> = Rest3,
+    IDSeq = lists:reverse([ ID || <<ID:32/unsigned-integer>> <= IDs ]),
+    Format = io_lib:format("#Ref<~B.~B.~B.~B>", [Creation|IDSeq]),
+    RefString = lists:flatten(Format),
+    {ok, list_to_ref(RefString), Rest4};
 
 %---------------------------------------------------------------------
 % Wildcard Pattern
