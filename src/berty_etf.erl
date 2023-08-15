@@ -63,8 +63,8 @@ code(Elsewise) -> Elsewise.
 default_options() ->
     #{ small_integer_ext => enabled
      , integer_ext => enabled
-     , float_ext => enabled
-     , new_float_ext => enabled
+     , float_ext => cursed
+     , new_float_ext => cursed
      , atom_utf8_ext => enabled
      , atom_ext => enabled
      , small_atom_ext => enabled
@@ -520,40 +520,73 @@ decode(Parser, Rest, Opts, State) ->
              {state, State}]}.
 
 decode_test() ->    
-    [ decode_properties(integer)
-    , decode_properties(string_ext)
-    , decode_properties(binary)
-    , decode_properties(list)
-    , decode_properties(tuple)
-    , decode_properties(map)
+    [ decode_properties(integer, default_options())
+    , decode_properties(atom, default_options())
+    , decode_properties(float, default_options())
+    , decode_properties(string_ext, default_options())
+    , decode_properties(binary, default_options())
+    , decode_properties(list, default_options())
+    , decode_properties(tuple, default_options())
+    , decode_properties(map, default_options())
     ].
 
+%%--------------------------------------------------------------------
+%% @hidden
+%% @doc function helper for property based testing.
+%% @end
+%%--------------------------------------------------------------------
+property_check(Term, Opts) ->
+    {ok, Term} =:= decode(term_to_binary(Term), Opts).
 
-decode_properties(integer) ->
-    Fun = fun(Integer) -> 
-                  {ok, Integer} =:= decode(term_to_binary(Integer)) 
-          end,
-    proper:quickcheck(?FORALL(Integer, integer(-4294967296,4294967296), Fun(Integer)), 10000);
-decode_properties(string_ext) ->
-    Fun = fun(String) ->
-                  {ok, String} =:= decode(term_to_binary(String)) 
-          end,
-    proper:quickcheck(?FORALL(String, string(), Fun(String)), 10000);
-decode_properties(binary) ->
-    proper:quickcheck(?FORALL(Binary, binary(), begin {ok, Binary} =:= decode(term_to_binary(Binary)) end), 10000);
-decode_properties(list) ->
+%%--------------------------------------------------------------------
+%% @hidden
+%% @doc properties generator.
+%% @end
+%%--------------------------------------------------------------------
+decode_properties(integer, Opts) ->
+    proper:quickcheck(?FORALL( Integer
+                             , integer(-4294967296,4294967296)
+                             , property_check(Integer, Opts))
+                     , 10000);
+decode_properties(float, Opts) ->
+    proper:quickcheck(?FORALL( Float
+                             , float()
+                             , property_check(Float,Opts))
+                     , 10000);
+decode_properties(atom, Opts) ->
+    proper:quickcheck(?FORALL(Atom
+                             , integer()
+                             , property_check(Atom, Opts))
+                     , 10000);
+decode_properties(string_ext, Opts) ->
+    proper:quickcheck(?FORALL( String
+                             , string()
+                             , property_check(String, Opts))
+                     , 10000);
+decode_properties(binary, Opts) ->
+    proper:quickcheck(?FORALL( Binary
+                             , binary()
+                             , property_check(Binary, Opts))
+                     , 10000);
+decode_properties(list, Opts) ->
     Types = [integer(), string(), binary()],
     Tuples = tuple(Types),
     Lists = list(Types),
     Elements = [Lists,Tuples|Types],
-    proper:quickcheck(?FORALL(List, list(Elements), begin {ok, List} =:= decode(term_to_binary(List)) end), 10000);
-decode_properties(tuple) ->
+    proper:quickcheck(?FORALL( List
+                             , list(Elements)
+                             , property_check(List, Opts))
+                     , 10000);
+decode_properties(tuple, Opts) ->
     Types = [integer(), string(), binary()],
     Tuples = tuple(Types),
     Lists = list(Types),
     Elements = [Lists,Tuples|Types],
-    proper:quickcheck(?FORALL(Tuple, tuple(Elements), begin {ok, Tuple} =:= decode(term_to_binary(Tuple)) end), 10000);
-decode_properties(map) ->
+    proper:quickcheck(?FORALL( Tuple
+                             , tuple(Elements)
+                             , property_check(Tuple, Opts))
+                     , 10000);
+decode_properties(map, Opts) ->
     Types = [integer(), string(), binary()],
     Tuples = tuple(Types),
     Lists = list(Types),
@@ -561,11 +594,9 @@ decode_properties(map) ->
     Maps = map(Elements, Elements),
     Keys = union([integer(), string(), binary(), Tuples, Lists, Maps]),
     Values = union([integer(), string(), binary(), Tuples, Lists, Maps]),
-    proper:quickcheck(?FORALL( {Key, Value}
+    proper:quickcheck(?FORALL( {Key, Value} = Map
                              , {Keys, Values}
-                             , begin 
-                                   {ok, #{ Key => Value }} =:= decode(term_to_binary(#{ Key => Value })) 
-                               end
+                             , property_check(Map, Opts)
                              )
                      , 10000).
 
