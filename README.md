@@ -11,6 +11,114 @@
 A clean, safe and flexible implementation of BERT, a data-structure
 format inspired by Erlang ETF.
 
+This project is in active development, and should not be used in
+production yet.
+
+## Features
+
+Primary features:
+
+ - [x] High level implementation of ETF in pure Erlang
+ - [ ] Atoms protection and limitation
+ - [ ] Fine grained filtering based on type
+ - [ ] Callback function or MFA
+ - [ ] Fallback to `binary_to_term` function on demand
+ - [ ] Drop terms on demande
+ - [ ] Term size limitation
+ - [ ] Custom options for term
+ - [ ] Property based testing
+ - [ ] BERT parser subset
+ - [ ] Depth type protection
+ - [ ] Fully documented
+ - [ ] +90% coverage
+ - [ ] 100% compatible with standard ETF
+ - [ ] 100% compatible with BERT
+
+Secondary features:
+
+ - [ ] Global or fine grained statistics
+ - [ ] Profiling and benchmarking facilities
+ - [ ] Logging facilities
+ - [ ] Tracing facilities
+ - [ ] ETF path
+ - [ ] ETF schema
+ - [ ] Custom parser subset based on behaviors
+ - [ ] ETF as stream of data
+ - [ ] Usage example with ETF, BERT and/or custom parser
+
+## Usage
+
+Berty was created to easily replace `binary_to_term/1` and
+`binary_to_term/2` built-in functions. In fact, the implementation is
+transparent in many cases. The big idea is to protect your system from
+outside, in particular atom and memory exhaution.
+
+```erlang
+% create an atom from scratch
+Atom = term_to_binary(test).
+
+% An atom is automatically converted as binary
+{ok, <<"test">>}
+  = berty:decode(Atom).
+
+% different methods can be used to deal with atoms.
+{ok, test}
+  = berty:decode(Atom, #{ atoms => {create, 0.2, warning} }).
+
+% Other terms are supported
+Terms = term_to_binary([{ok,1.0,"test",<<>>}]),
+{ok, [{ok,1.0,"test",<<>>}]}
+  = berty:decode(Terms).
+```
+
+More features are present, for example, dropping terms or creating
+custom callbacks.
+
+```erlang
+Lists = term_to_binary([1024,<<>>,"test"]).
+
+% let drop all integers
+{ok, [<<>>, "test"]}
+  = berty:decode(Lists, #{ integer_ext => drop
+                         , small_integer_ext => drop
+                         }).
+
+% let create a custom callback
+Callback = fun
+  (_Term, Rest) ->
+    {ok, doh, Rest}
+end.
+{ok, [doh, <<>>, "test"]}
+  = berty:decode(Lists, #{ integer_ext => {callback, Callback}
+                         , small_integer_ext => {callback, Callback}
+                         }).
+
+% let create another one.
+Callback2 = fun
+  (Term, Rest) when 1024 =:= Term ->
+    logger:warning("catch term ~p", [1024]),
+    {ok, Term, Rest};
+  (Term, Rest) -> {ok, Term, Rest}
+end.
+
+{ok, [1024, <<>>, "test"]}
+  = berty:decode(Lists, #{ integer_ext => {callback, Callback2}
+                         , small_integer_ext => {callback, Callback2}
+                         }).
+```
+
+Those are simple examples, more features are present and will be
+added. Here the most important functions:
+
+ - `berty:decode/1`: standard BERT decoder with default options
+ - `berty:decode/2`: standard BERT decoder with custom options
+ - `berty:decode/3`: custom decoder with custom options
+ - `berty:encode/1`: standard BERT encoder with default options
+ - `berty:encode/2`: standard BERT encoder with custom options
+ - `berty:encode/3`: custom encoder with custom options
+ - `berty:binary_to_term/1`: wrapper around `binary_to_term/1`
+ - `berty:term_to_binary/1`: wrapper around `term_to_binary/1`
+
 ## Build
 
 ```sh
@@ -61,7 +169,7 @@ few examples:
    terms are deserialized, atoms can be (1) converted in existing atom
    (2) converted in binary or list (3) simply dropped or replaced with
    something to alert the VM this part of the data is dangerous.
-   
+
  - keep our own local atom table containing all atom deserialized. A
    soft/hard limit can be set.
 
@@ -78,15 +186,15 @@ projects are using that?
 
   ```erlang
   -spec decode(binary()) -> term().
-  
+
   decode(Bin) ->
     decode_term(binary_to_term(Bin)).
-    
+
   ```
 
 - [`mojombo/ernie`](https://github.com/mojombo/ernie):
   https://github.com/mojombo/ernie/blob/master/elib/ernie_server.erl#L178
-  
+
   ```erlang
   receive_term(Request, State) ->
     Sock = Request#request.sock,
@@ -98,7 +206,7 @@ projects are using that?
 
 - [`sync/n2o`](https://github.com/synrc/n2o):
   https://github.com/synrc/n2o/blob/master/src/services/n2o_bert.erl#L8
-  
+
   ```erlang
   encode(#ftp{}=FTP) -> term_to_binary(setelement(1,FTP,ftpack));
   encode(Term)       -> term_to_binary(Term).
@@ -119,14 +227,14 @@ projects are using that?
 
 - [`a13x/aberth`](https://github.com/a13x/aberth):
   https://github.com/a13x/aberth/blob/master/src/bert.erl#L25
-  
+
   ```erlang
   -spec decode(binary()) -> term().
-  
+
   decode(Bin) ->
     decode_term(binary_to_term(Bin)).
   ```
-  
+
 
 - [`yuce/bert.erl`](https://github.com/yuce/bert.erl):
   https://github.com/yuce/bert.erl/blob/master/src/bert.erl#L24
@@ -167,15 +275,15 @@ deal with atoms and divide the problem in half:
 
  1. create fixed atom store containing only atoms from source code
     (Erlang release and project), this one can't be increased.
-    
+
  2. create a second atom store containing dynamically created atoms
     during runtime, this one can be increased.
-    
+
 What I worry about is when dealing with mnesia. What could happen if
 someone create more than 2M unwanted atoms added in Mnesia or DETS?
 What kind of behavior the cluster will have? And how to fix that if
 it's critical.
-    
+
 Unfortunately, I think it will totally break atom performance, but it
 could be an interesting project to learn how Erlang BEAM works under
 the hood.
@@ -207,7 +315,7 @@ binary_to_term(<<131, 111, 4294967294:32/unsigned-integer, 0:8/integer, 255:8, 0
 ```
 
 Generating ETF payload with very long binaries can also have
-an impact on CPUs, the following code can generate DoS and if many process 
+an impact on CPUs, the following code can generate DoS and if many process
 
 ```erlang
 % big payload, high cpu usage, no crash.
@@ -259,20 +367,22 @@ feature.
 
 It might be great to have syntax to create ETF schema, a bit like
 protobuf[^protobuf], json schema[^json-schema], XML[^xml] (with
-XLST[^xlst]) or ASN.1[^asn.1].
+XLST[^xlst]) or ASN.1[^asn.1]. In fact, when I started to find
+something around this feature, I also found UBF[^ubf] project from Joe
+Armstrong.
 
 ```erlang
 schema1() ->
   integer().
-  
+
 schema2() ->
   tuple([[atom(ok), integer()]
         ,[atom(error), string(1024)]).
-        
+
 % fun ({ok, X}) when is_integer(X) -> true;
 %     ({error, X) when is_list(X) andalso length(X) =< 1024 -> is_string(X);
 %     (_) -> false.
-        
+
 schema3() ->
   tuple(
 ```
@@ -296,6 +406,7 @@ Here the final representation.
 [^xml]: https://en.wikipedia.org/wiki/XML
 [^xlst]: https://en.wikipedia.org/wiki/XSLT
 [^asn.1]: https://en.wikipedia.org/wiki/ASN.1
+[^ubf]: https://ubf.github.io/ubf/ubf-user-guide.en.html
 
 ## What about an ETF path feature?
 
@@ -384,3 +495,8 @@ each terms is it safe or not and with the risk(s).
 | `SMALL_TUPLE_EXT`     |  104 |    maybe | dynamic tuple length (8bits)
 | `STRING_EXT`          |  107 |    maybe | dynamic string length (16bits)
 | `V4_PORT_EXT`         |  120 |       no | atom exhaustion
+
+# Resources
+
+ - [BERT-RPC Official](https://bert-rpc.org) [(archive)](https://web.archive.org/web/20160304092040/http://bert-rpc.org/)
+ - [BERT-RPC Google group](https://groups.google.com/g/bert-rpc)

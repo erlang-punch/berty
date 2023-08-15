@@ -34,5 +34,3 @@ default_options() ->
 
 decode(Data) ->
     berty_etf:decode(Data, default_options()).
-
-    

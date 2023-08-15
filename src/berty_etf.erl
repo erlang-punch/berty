@@ -130,8 +130,8 @@ default_options() ->
 -type string_ext() :: enabled | disabled | callback_option().
 -type v4_port_ext() :: enabled | disabled | cursed | callback_option().
 
--type atoms() :: create 
-               | {create, number()} 
+-type atoms() :: create
+               | {create, number()}
                | {create, number(), warning}
                | as_string
                | as_binary
@@ -183,11 +183,11 @@ default_options() ->
 %%--------------------------------------------------------------------
 -spec decode(Data) -> Return when
       Data :: binary(),
-      Return :: {ok, term()} 
-              | {ok, term(), binary()} 
+      Return :: {ok, term()}
+              | {ok, term(), binary()}
               | {error, Reason},
       Reason :: proplists:proplist().
-      
+
 decode(Data) ->
     decode(Data, default_options()).
 
@@ -196,8 +196,8 @@ decode(Data) ->
 %%--------------------------------------------------------------------
 -spec decode(Data, Opts) -> Return when
       Data :: binary(),
-      Return :: {ok, term()} 
-              | {ok, term(), binary()} 
+      Return :: {ok, term()}
+              | {ok, term(), binary()}
               | {error, Reason},
       Opts :: options(),
       Reason :: proplists:proplist().
@@ -247,9 +247,9 @@ decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/b
       , #{ small_integer_ext := {callback, Callback }} = Opts, State) ->
     Params = [Integer, Rest],
     case Callback of
-        _ when is_function(Callback) -> 
+        _ when is_function(Callback) ->
             apply(Callback, Params);
-        {Module, Function, Args} -> 
+        {Module, Function, Args} ->
             apply(Module, Function, [Params|Args])
     end;
 decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/binary>>
@@ -560,7 +560,7 @@ decode(Parser, Rest, Opts, State) ->
             ,{opts, Opts},
              {state, State}]}.
 
-decode_test() ->    
+decode_test() ->
     [ decode_properties(integer, default_options())
     , decode_properties(atom, default_options())
     , decode_properties(float, default_options())
