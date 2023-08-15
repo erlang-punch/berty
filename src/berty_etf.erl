@@ -71,6 +71,8 @@ default_options() ->
      , small_atom_utf8_ext => enabled
      , small_tuple_ext => enabled
      , small_tuple_ext_arity => {0, 255}
+     , small_big_ext => cursed
+     , large_big_ext => cursed
      , large_tuple_ext => enabled
      , large_tuple_ext_arity => {0, 1024}
      , string_ext => enabled
@@ -86,7 +88,7 @@ default_options() ->
      % , map_ext_value_terms => [any]
      }.
 
--type callback_option() :: {callback, function() | atom()}.
+-type callback_option() :: {callback, function() | {atom(), atom(), [term(), ...]}}.
 -type limit_option() :: {number(), number()}.
 
 -type atom_ext() :: enabled | disabled | cursed | callback_option().
@@ -121,7 +123,7 @@ default_options() ->
 -type small_atom_utf8_ext() :: enabled | disabled | cursed | callback_option().
 -type small_atom_utf8_ext_size() :: limit_option().
 -type small_integer_ext_limit() :: limit_option().
--type small_integer_ext() :: enabled | disabled | callback_option().
+-type small_integer_ext() :: enabled | disabled | drop | cursed | callback_option().
 -type small_tuple_ext_arity() :: limit_option().
 -type small_tuple_ext() :: enabled | disabled | callback_option().
 -type string_ext_length() :: limit_option().
@@ -206,6 +208,7 @@ decode(<<131, Data/binary>> = _Payload, Opts) ->
     NewOpts = maps:merge(DefaultOpts, Opts),
     case decode(Data, NewOpts, State) of
         {ok, Term, <<>>} -> {ok, Term};
+        {next, Rest} -> decode(Rest, NewOpts, State);
         Elsewise -> Elsewise
     end.
 
@@ -236,17 +239,35 @@ decode(<<First:8/unsigned-integer, _/binary>> = Data, Opts, #state{ module = Mod
 % small_integer_ext => enabled | disabled | {callback, Callback}
 % small_integer_ext_limit => {Min, Max}
 %---------------------------------------------------------------------
-decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/binary>>, #{ small_integer_ext := cursed }, _State) ->
+decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/binary>>
+      , #{ small_integer_ext := cursed }, _State) ->
     Result = ?BINARY_TO_TERM(<<131, ?SMALL_INTEGER_EXT, Integer/integer>>),
     {ok, Result, Rest};
-decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/binary>>, _, _State) ->
+decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/binary>>
+      , #{ small_integer_ext := {callback, Callback }} = Opts, State) ->
+    Params = [Integer, Rest],
+    case Callback of
+        _ when is_function(Callback) -> 
+            apply(Callback, Params);
+        {Module, Function, Args} -> 
+            apply(Module, Function, [Params|Args])
+    end;
+decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/binary>>
+      , #{ small_integer_ext := drop }, _State) ->
+    {next, Rest};
+decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/binary>>
+      , #{ small_integer_ext := disabled }, _State) ->
+    {error, [{reason, "small_integer_ext disabled"}]};
+decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/binary>>
+      , #{ small_integer_ext := enabled }, _State) ->
     {ok, Integer, Rest};
 
 %---------------------------------------------------------------------
 % integer_ext => enabled | disabled | {callback, Callback}
 % integer_ext_limit => {Min, Max}
 %---------------------------------------------------------------------
-decode(integer_ext, <<?INTEGER_EXT, Integer:32/signed-integer, Rest/binary>>, _, _State) ->
+decode(integer_ext, <<?INTEGER_EXT, Integer:32/signed-integer, Rest/binary>>
+      , #{ integer_ext := enabled }, _State) ->
     {ok, Integer, Rest};
 
 %---------------------------------------------------------------------
@@ -510,6 +531,26 @@ decode(newer_reference_ext, <<?NEWER_REFERENCE_EXT, Length:16/unsigned-integer, 
     {ok, list_to_ref(RefString), Rest4};
 
 %---------------------------------------------------------------------
+%
+%---------------------------------------------------------------------
+decode(small_big_ext, <<?SMALL_BIG_EXT, Size:8/unsigned-integer, Sign:8/unsigned-integer, Rest/binary>>
+      , #{ small_big_ext := cursed } = Opts, _State) ->
+    <<Value:Size/binary, Rest2/binary>> = Rest,
+    Bignum = binary_to_term(<<131, ?SMALL_BIG_EXT, Size:8/unsigned-integer
+                             ,Sign:8/unsigned-integer, Value:Size/binary>>, []),
+    {ok, Bignum, Rest2};
+
+%---------------------------------------------------------------------
+%
+%---------------------------------------------------------------------
+decode(large_big_ext, <<?LARGE_BIG_EXT, Size:32/unsigned-integer, Sign:8/unsigned-integer, Rest/binary>>
+      , #{ large_big_ext := cursed } = Opts, _State) ->
+    <<Value:Size/binary, Rest2/binary>> = Rest,
+    Bignum = binary_to_term(<<131, ?LARGE_BIG_EXT, Size:32/unsigned-integer
+                             ,Sign:8/unsigned-integer, Value:Size/binary>>, []),
+    {ok, Bignum, Rest2};
+
+%---------------------------------------------------------------------
 % Wildcard Pattern
 %---------------------------------------------------------------------
 decode(Parser, Rest, Opts, State) ->
@@ -548,6 +589,11 @@ decode_properties(integer, Opts) ->
                              , integer(-4294967296,4294967296)
                              , property_check(Integer, Opts))
                      , 10000);
+decode_properties(big, Opts) ->
+    proper:quickcheck(?FORALL( Integer
+                             , largeinteger()
+                             , property_check(Integer, Opts))
+                     , 10000);
 decode_properties(float, Opts) ->
     proper:quickcheck(?FORALL( Float
                              , float()
@@ -567,6 +613,11 @@ decode_properties(binary, Opts) ->
     proper:quickcheck(?FORALL( Binary
                              , binary()
                              , property_check(Binary, Opts))
+                     , 10000);
+decode_properties(bitstring, Opts) ->
+    proper:quickcheck(?FORALL( Bitstring
+                             , bitstring()
+                             , property_check(Bitstring, Opts))
                      , 10000);
 decode_properties(list, Opts) ->
     Types = [integer(), string(), binary()],
@@ -691,8 +742,13 @@ decode_list_ext(0, Rest, Opts, State, Buffer) ->
     {ok, [], Rest2} = decode(nil_ext, Rest, Opts, State),
     {ok, lists:reverse(Buffer), Rest2};
 decode_list_ext(Length, Rest, Opts, State, Buffer) ->
-    {ok, Term, Rest2} = decode(Rest, Opts, State),
-    decode_list_ext(Length-1, Rest2, Opts, State, [Term|Buffer]).
+    case decode(Rest, Opts, State) of
+        {ok, Term, Rest2} ->
+            decode_list_ext(Length-1, Rest2, Opts, State, [Term|Buffer]);
+        {next, Rest2} ->
+            decode_list_ext(Length-1, Rest2, Opts, State, Buffer);
+        Elsewise -> Elsewise
+    end.
 
 %%--------------------------------------------------------------------
 %% @hidden
