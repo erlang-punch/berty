@@ -9,6 +9,12 @@
 -export([decode/1, decode/2]).
 -include("berty.hrl").
 -include_lib("kernel/include/logger.hrl").
+-include_lib("proper/include/proper.hrl").
+-include_lib("eunit/include/eunit.hrl").
+
+%---------------------------------------------------------------------
+%
+%--------------------------------------------------------------------
 -record(state, { id = make_ref()
                , module = ?MODULE
                , started_at = undefined
@@ -82,38 +88,92 @@ default_options() ->
 
 -type callback_option() :: {callback, function() | atom()}.
 -type limit_option() :: {number(), number()}.
--type small_integer_ext_option() :: enabled | disabled | callback_option().
--type small_integer_ext_limit_option() :: limit_option().
--type integer_ext_option() ::  enabled | disabled | callback_option().
--type integer_ext_limit_option() :: limit_option().
--type float_ext_option() ::  enabled | disabled | cursed | callback_option().
--type float_ext_limit_option() :: limit_option().
--type new_float_ext_option() ::  enabled | disabled | cursed | callback_option().
--type new_float_ext_limit_option() :: limit_option().
--type atom_ext_option() :: enabled | disabled | cursed | callback_option().
--type atom_ext_size_option() :: limit_option().
--type small_atom_ext_option() ::  enabled | disabled | cursed | callback_option().
--type small_atom_ext_size_option() :: limit_option().
--type atoms_option() :: create 
-                      | {create, number()} 
-                      | {create, number(), warning}
-                      | as_string
-                      | as_binary
-                      | existing.
 
--type options() :: #{ small_integer_ext => small_integer_ext_option()
-                    , small_integer_ext_limit => small_integer_ext_limit_option()
-                    , integer_ext => integer_ext_option()
-                    , integer_ext_limit => integer_ext_limit_option()
-                    , float_ext => float_ext_option()
-                    , float_ext_limit => float_ext_limit_option()
-                    , new_float_ext => new_float_ext_option()
-                    , new_float_ext_limit => new_float_ext_limit_option()
-                    , atom_ext => atom_ext_option()
-                    , atom_ext_size => atom_ext_size_option()
-                    , small_atom_ext => small_atom_ext_option()
-                    , small_atom_ext_size => small_atom_ext_size_option()
-                    , atoms => atoms_option()
+-type atom_ext() :: enabled | disabled | cursed | callback_option().
+-type atom_ext_size() :: limit_option().
+-type atom_utf8_ext() ::  enabled | disabled | cursed | callback_option().
+-type atom_utf8_ext_size() :: limit_option().
+-type binary_ext() :: enabled | disabled | callback_option().
+-type binary_ext_size() :: limit_option().
+-type bit_binary_ext() :: enabled | disabled | callback_option().
+-type bit_binary_ext_size() :: limit_option().
+-type float_ext_limit() :: limit_option().
+-type float_ext() ::  enabled | disabled | cursed | callback_option().
+-type integer_ext_limit() :: limit_option().
+-type integer_ext() ::  enabled | disabled | callback_option().
+-type large_tuple_ext_arity() :: limit_option().
+-type large_tuple_ext() :: enabled | disabled | callback_option().
+-type list_ext_length() :: limit_option().
+-type list_ext() :: enabled | disabled | callback_option().
+-type map_ext_length() :: limit_option().
+-type map_ext() ::  enabled | disabled | callback_option().
+-type new_float_ext_limit() :: limit_option().
+-type new_float_ext() ::  enabled | disabled | cursed | callback_option().
+-type new_pid_ext() :: enabled | disabled | cursed | callback_option().
+-type new_port_ext() :: enabled | disabled | cursed | callback_option().
+-type new_reference_ext() :: enabled | disabled | cursed | callback_option().
+-type newer_reference_ext() :: enabled | disabled | cursed | callback_option().
+-type nil_ext() :: enabled | disabled | callback_option().
+-type pid_ext() :: enabled | disabled | cursed | callback_option().
+-type port_ext() :: enabled | disabled | cursed | callback_option().
+-type small_atom_ext() ::  enabled | disabled | cursed | callback_option().
+-type small_atom_ext_size() :: limit_option().
+-type small_atom_utf8_ext() :: enabled | disabled | cursed | callback_option().
+-type small_atom_utf8_ext_size() :: limit_option().
+-type small_integer_ext_limit() :: limit_option().
+-type small_integer_ext() :: enabled | disabled | callback_option().
+-type small_tuple_ext_arity() :: limit_option().
+-type small_tuple_ext() :: enabled | disabled | callback_option().
+-type string_ext_length() :: limit_option().
+-type string_ext() :: enabled | disabled | callback_option().
+-type v4_port_ext() :: enabled | disabled | cursed | callback_option().
+
+-type atoms() :: create 
+               | {create, number()} 
+               | {create, number(), warning}
+               | as_string
+               | as_binary
+               | existing.
+
+-type options() :: #{ atom_ext => atom_ext()
+                    , atom_ext_size => atom_ext_size()
+                    , atom_utf8_ext  => atom_utf8_ext()
+                    , atom_utf8_ext_size => atom_utf8_ext_size()
+                    , binary_ext => binary_ext()
+                    , binary_ext_size => binary_ext_size()
+                    , bit_binary_ext => bit_binary_ext()
+                    , bit_binary_ext_size => bit_binary_ext_size()
+                    , float_ext => float_ext()
+                    , float_ext_limit => float_ext_limit()
+                    , integer_ext => integer_ext()
+                    , integer_ext_limit => integer_ext_limit()
+                    , large_tuple_ext_arity => large_tuple_ext_arity()
+                    , large_tuple_ext => large_tuple_ext()
+                    , list_ext_length => list_ext_length()
+                    , list_ext => list_ext()
+                    , map_ext_length => map_ext_length()
+                    , map_ext => map_ext()
+                    , new_float_ext => new_float_ext()
+                    , new_float_ext_limit => new_float_ext_limit()
+                    , new_pid_ext => new_pid_ext()
+                    , new_port_ext => new_port_ext()
+                    , new_reference_ext => new_reference_ext()
+                    , newer_reference_ext => newer_reference_ext()
+                    , nil_ext => nil_ext()
+                    , pid_ext => pid_ext()
+                    , port_ext => port_ext()
+                    , small_atom_ext => small_atom_ext()
+                    , small_atom_ext_size => small_atom_ext_size()
+                    , small_atom_utf8_ext => small_atom_utf8_ext()
+                    , small_atom_utf8_ext_size => small_atom_utf8_ext_size()
+                    , small_integer_ext_limit => small_integer_ext_limit()
+                    , small_integer_ext => small_integer_ext()
+                    , small_tuple_ext_arity => small_tuple_ext_arity()
+                    , small_tuple_ext => small_tuple_ext()
+                    , string_ext_length => string_ext_length()
+                    , string_ext => string_ext()
+                    , v4_port_ext => v4_port_ext()
+                    , atoms => atoms()
                     }.
 
 %%--------------------------------------------------------------------
@@ -176,10 +236,10 @@ decode(<<First:8/unsigned-integer, _/binary>> = Data, Opts, #state{ module = Mod
 % small_integer_ext => enabled | disabled | {callback, Callback}
 % small_integer_ext_limit => {Min, Max}
 %---------------------------------------------------------------------
-decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/signed-integer, Rest/binary>>, #{ small_integer_ext := cursed }, _State) ->
+decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/binary>>, #{ small_integer_ext := cursed }, _State) ->
     Result = ?BINARY_TO_TERM(<<131, ?SMALL_INTEGER_EXT, Integer/integer>>),
     {ok, Result, Rest};
-decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/signed-integer, Rest/binary>>, _, _State) ->
+decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/binary>>, _, _State) ->
     {ok, Integer, Rest};
 
 %---------------------------------------------------------------------
@@ -413,18 +473,22 @@ decode(new_pid_ext, <<?NEW_PID_EXT, Rest/binary>>
 %---------------------------------------------------------------------
 % @todo to be tested
 %---------------------------------------------------------------------
-decode(reference_ext, <<?REFERENCE_EXT, Rest/binary>>
-      ,#{ reference_ext := cursed } = Opts, State) ->
-    {ok, Node, Rest2} = decode(atom_ext, Rest, Opts#{ atoms => create }, State),
-    <<ID:32/unsigned-integer, Creation:8/unsigned-integer, Rest3/binary>> = Rest2,
-    {error, Node, ID, Creation};
+% -type reference_ext() :: enabled | disabled | cursed | callback_option().
+% decode(reference_ext, <<?REFERENCE_EXT, Rest/binary>>
+%       ,#{ reference_ext := cursed } = Opts, State) ->
+%     {ok, Node, Rest2} = decode(atom_ext, Rest, Opts#{ atoms => create }, State),
+%     <<ID:32/unsigned-integer, Creation:8/unsigned-integer, Rest3/binary>> = Rest2,
+%     IDSeq = lists:reverse([ ID || <<ID:32/unsigned-integer>> <= IDs ]),
+%     Format = io_lib:format("#Ref<~B.~B.~B.~B>", [Creation|IDSeq]),
+%     RefString = lists:flatten(Format),
+%     {ok, list_to_ref(RefString), Rest4};
 
 %---------------------------------------------------------------------
 % @todo to be tested
 %---------------------------------------------------------------------
 decode(new_reference_ext, <<?NEW_REFERENCE_EXT, Length:16/unsigned-integer, Rest/binary>>
       ,#{ new_reference_ext := cursed } = Opts, State) ->
-    {ok, Node, Rest2} = decode(atom_ext, Rest, Opts#{ atoms => create }, State),
+    {ok, _Node, Rest2} = decode(atom_ext, Rest, Opts#{ atoms => create }, State),
     <<Creation:8/unsigned-integer, Rest3/binary>> = Rest2,
     <<IDs:(4*Length)/binary, Rest4/binary>> = Rest3,
     IDSeq = lists:reverse([ ID || <<ID:32/unsigned-integer>> <= IDs ]),
@@ -432,13 +496,12 @@ decode(new_reference_ext, <<?NEW_REFERENCE_EXT, Length:16/unsigned-integer, Rest
     RefString = lists:flatten(Format),
     {ok, list_to_ref(RefString), Rest4};
 
-
 %---------------------------------------------------------------------
 % @todo to cleanup this mess
 %---------------------------------------------------------------------
 decode(newer_reference_ext, <<?NEWER_REFERENCE_EXT, Length:16/unsigned-integer, Rest/binary>>
       ,#{ newer_reference_ext := cursed } = Opts, State) ->
-    {ok, Node, Rest2} = decode(atom_ext, Rest, Opts#{ atoms => create }, State),
+    {ok, _Node, Rest2} = decode(atom_ext, Rest, Opts#{ atoms => create }, State),
     <<Creation:32/unsigned-integer, Rest3/binary>> = Rest2,
     <<IDs:(4*Length)/binary, Rest4/binary>> = Rest3,
     IDSeq = lists:reverse([ ID || <<ID:32/unsigned-integer>> <= IDs ]),
@@ -455,6 +518,56 @@ decode(Parser, Rest, Opts, State) ->
             ,{rest, Rest}
             ,{opts, Opts},
              {state, State}]}.
+
+decode_test() ->    
+    [ decode_properties(integer)
+    , decode_properties(string_ext)
+    , decode_properties(binary)
+    , decode_properties(list)
+    , decode_properties(tuple)
+    , decode_properties(map)
+    ].
+
+
+decode_properties(integer) ->
+    Fun = fun(Integer) -> 
+                  {ok, Integer} =:= decode(term_to_binary(Integer)) 
+          end,
+    proper:quickcheck(?FORALL(Integer, integer(-4294967296,4294967296), Fun(Integer)), 10000);
+decode_properties(string_ext) ->
+    Fun = fun(String) ->
+                  {ok, String} =:= decode(term_to_binary(String)) 
+          end,
+    proper:quickcheck(?FORALL(String, string(), Fun(String)), 10000);
+decode_properties(binary) ->
+    proper:quickcheck(?FORALL(Binary, binary(), begin {ok, Binary} =:= decode(term_to_binary(Binary)) end), 10000);
+decode_properties(list) ->
+    Types = [integer(), string(), binary()],
+    Tuples = tuple(Types),
+    Lists = list(Types),
+    Elements = [Lists,Tuples|Types],
+    proper:quickcheck(?FORALL(List, list(Elements), begin {ok, List} =:= decode(term_to_binary(List)) end), 10000);
+decode_properties(tuple) ->
+    Types = [integer(), string(), binary()],
+    Tuples = tuple(Types),
+    Lists = list(Types),
+    Elements = [Lists,Tuples|Types],
+    proper:quickcheck(?FORALL(Tuple, tuple(Elements), begin {ok, Tuple} =:= decode(term_to_binary(Tuple)) end), 10000);
+decode_properties(map) ->
+    Types = [integer(), string(), binary()],
+    Tuples = tuple(Types),
+    Lists = list(Types),
+    Elements = [Lists,Tuples|Types],
+    Maps = map(Elements, Elements),
+    Keys = union([integer(), string(), binary(), Tuples, Lists, Maps]),
+    Values = union([integer(), string(), binary(), Tuples, Lists, Maps]),
+    proper:quickcheck(?FORALL( {Key, Value}
+                             , {Keys, Values}
+                             , begin 
+                                   {ok, #{ Key => Value }} =:= decode(term_to_binary(#{ Key => Value })) 
+                               end
+                             )
+                     , 10000).
 
 %%--------------------------------------------------------------------
 %% @hidden
