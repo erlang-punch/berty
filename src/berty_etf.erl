@@ -70,27 +70,19 @@ default_options() ->
      , small_atom_ext => enabled
      , small_atom_utf8_ext => enabled
      , small_tuple_ext => enabled
-     , small_tuple_ext_arity => {0, 255}
      , small_big_ext => cursed
      , large_big_ext => cursed
      , large_tuple_ext => enabled
-     , large_tuple_ext_arity => {0, 1024}
      , string_ext => enabled
-     , string_ext_length => {0, 65535}
      , nil_ext => enabled
      , list_ext => enabled
-     , list_ext_length => {0, 1048576}
      , binary_ext => enabled
      , bit_binary_ext => enabled
      , map_ext => enabled
-     , map_ext_length => {0, 65535}
-     % , map_ext_key_terms => [binary_ext, string_ext, ...]
-     % , map_ext_value_terms => [any]
      }.
 
 -type callback_option() :: {callback, function() | {atom(), atom(), [term(), ...]}}.
 -type limit_option() :: {number(), number()}.
-
 -type atom_ext() :: enabled | disabled | cursed | callback_option().
 -type atom_ext_size() :: limit_option().
 -type atom_utf8_ext() ::  enabled | disabled | cursed | callback_option().
@@ -138,25 +130,25 @@ default_options() ->
                | existing.
 
 -type options() :: #{ atom_ext => atom_ext()
-                    , atom_ext_size => atom_ext_size()
+                    , {atom_ext, size} => atom_ext_size()
                     , atom_utf8_ext  => atom_utf8_ext()
-                    , atom_utf8_ext_size => atom_utf8_ext_size()
+                    , {atom_utf8_ext, size} => atom_utf8_ext_size()
                     , binary_ext => binary_ext()
-                    , binary_ext_size => binary_ext_size()
+                    , {binary_ext, size} => binary_ext_size()
                     , bit_binary_ext => bit_binary_ext()
                     , bit_binary_ext_size => bit_binary_ext_size()
                     , float_ext => float_ext()
                     , float_ext_limit => float_ext_limit()
                     , integer_ext => integer_ext()
-                    , integer_ext_limit => integer_ext_limit()
-                    , large_tuple_ext_arity => large_tuple_ext_arity()
+                    , {integer_ext, limit} => integer_ext_limit()
+                    , {large_tuple_ext, arity} => large_tuple_ext_arity()
                     , large_tuple_ext => large_tuple_ext()
-                    , list_ext_length => list_ext_length()
+                    , {list_ext, length} => list_ext_length()
                     , list_ext => list_ext()
-                    , map_ext_length => map_ext_length()
+                    , {map_ext, length} => map_ext_length()
                     , map_ext => map_ext()
                     , new_float_ext => new_float_ext()
-                    , new_float_ext_limit => new_float_ext_limit()
+                    , {new_float_ext, limit} => new_float_ext_limit()
                     , new_pid_ext => new_pid_ext()
                     , new_port_ext => new_port_ext()
                     , new_reference_ext => new_reference_ext()
@@ -165,14 +157,14 @@ default_options() ->
                     , pid_ext => pid_ext()
                     , port_ext => port_ext()
                     , small_atom_ext => small_atom_ext()
-                    , small_atom_ext_size => small_atom_ext_size()
+                    , {small_atom_ext, size} => small_atom_ext_size()
                     , small_atom_utf8_ext => small_atom_utf8_ext()
                     , small_atom_utf8_ext_size => small_atom_utf8_ext_size()
-                    , small_integer_ext_limit => small_integer_ext_limit()
+                    , {small_integer_ext, limit} => small_integer_ext_limit()
                     , small_integer_ext => small_integer_ext()
-                    , small_tuple_ext_arity => small_tuple_ext_arity()
+                    , {small_tuple_ext, arity} => small_tuple_ext_arity()
                     , small_tuple_ext => small_tuple_ext()
-                    , string_ext_length => string_ext_length()
+                    , {string_ext, length} => string_ext_length()
                     , string_ext => string_ext()
                     , v4_port_ext => v4_port_ext()
                     , atoms => atoms()
@@ -185,7 +177,8 @@ default_options() ->
       Data :: binary(),
       Return :: {ok, term()}
               | {ok, term(), binary()}
-              | {error, Reason},
+              | {error, Reason, State},
+      State :: #state{},
       Reason :: proplists:proplist().
 
 decode(Data) ->
@@ -198,7 +191,8 @@ decode(Data) ->
       Data :: binary(),
       Return :: {ok, term()}
               | {ok, term(), binary()}
-              | {error, Reason},
+              | {error, Reason, State},
+      State :: #state{},
       Opts :: options(),
       Reason :: proplists:proplist().
 
@@ -209,7 +203,11 @@ decode(<<131, Data/binary>> = _Payload, Opts) ->
     case decode(Data, NewOpts, State) of
         {ok, Term, <<>>} -> {ok, Term};
         {next, Rest} -> decode(Rest, NewOpts, State);
-        Elsewise -> Elsewise
+        {error, Reason, ErrorState} ->
+            ?LOG_ERROR("~p", [{Reason, ErrorState}]),
+            {error, Reason};
+        Elsewise ->
+            Elsewise
     end.
 
 %%--------------------------------------------------------------------
@@ -240,23 +238,33 @@ decode(<<First:8/unsigned-integer, _/binary>> = Data, Opts, #state{ module = Mod
 % small_integer_ext_limit => {Min, Max}
 %---------------------------------------------------------------------
 decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/binary>>
-      , #{ small_integer_ext := cursed }, _State) ->
-    Result = ?BINARY_TO_TERM(<<131, ?SMALL_INTEGER_EXT, Integer/integer>>),
-    {ok, Result, Rest};
+      , #{ small_integer_ext := cursed } = Opts, State) ->
+    {Min, Max} = maps:get({small_integer_ext, limit}, Opts, {0,255}),
+    if Integer >= Min andalso Integer =< Max ->
+            Result = ?BINARY_TO_TERM(<<131, ?SMALL_INTEGER_EXT, Integer/integer>>),
+            {ok, Result, Rest};
+       true ->
+            {error, [{reason, "small_integer_ext limits"}], State}
+    end;
 decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/binary>>
-      , #{ small_integer_ext := disabled }, _State) ->
-    {error, [{reason, "small_integer_ext disabled"}]};
+      , #{ small_integer_ext := disabled }, State) ->
+    {error, [{reason, "small_integer_ext disabled"}], State};
 decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/binary>>
-      , #{ small_integer_ext := Context }, _State) ->
-    Params = [Integer, Rest],
-    case Context of
-        drop -> {next, Rest};
-        {callback, Callback} 
-          when is_function(Callback) -> 
-            apply(Callback, Params);
-        {Module, Function, Args} -> 
-            apply(Module, Function, [Params|Args]);
-        _Elsewise -> {ok, Integer, Rest}
+      , #{ small_integer_ext := Context } = Opts, State) ->
+    {Min, Max} = maps:get({small_integer_ext, limit}, Opts, {0,255}),
+    if Integer >= Min andalso Integer =< Max ->
+            Params = [Integer, Rest],
+            case Context of
+                drop -> {next, Rest};
+                {callback, Callback} 
+                  when is_function(Callback) -> 
+                    apply(Callback, Params);
+                {Module, Function, Args} -> 
+                    apply(Module, Function, [Params|Args]);
+                _Elsewise -> {ok, Integer, Rest}
+            end;
+       true ->
+            {error, [{reason, "small_integer_ext limits"}], State}
     end;
 
 %---------------------------------------------------------------------
@@ -268,8 +276,8 @@ decode(integer_ext, <<?INTEGER_EXT, Integer:32/signed-integer, Rest/binary>>
     Result = ?BINARY_TO_TERM(<<131, ?INTEGER_EXT, Integer:32/integer>>),
     {ok, Result, Rest};
 decode(integer_ext, <<?INTEGER_EXT, Integer:32/signed-integer, Rest/binary>>
-      , #{ integer_ext := disabled }, _State) ->
-    {error, [{reason, "integer_ext disabled"}]};
+      , #{ integer_ext := disabled }, State) ->
+    {error, [{reason, "integer_ext disabled"}], State};
 decode(integer_ext, <<?INTEGER_EXT, Integer:32/signed-integer, Rest/binary>>
       , #{ integer_ext := Context }, _State) ->
     Params = [Integer, Rest],
@@ -391,7 +399,14 @@ decode(atom_utf8_ext, <<?ATOM_UTF8_EXT, Length:16/unsigned-integer, Rest/binary>
 decode(small_tuple_ext, <<?SMALL_TUPLE_EXT, 0/unsigned-integer, Rest/binary>>, _, _State) ->
     {ok, {}, Rest};
 decode(small_tuple_ext, <<?SMALL_TUPLE_EXT, Arity/unsigned-integer, Rest/binary>>, Opts, State) ->
-    decode_tuple_ext(Arity, Rest, Opts, State);
+    {Min, Max} = maps:get({small_tuple_ext, limit}, Opts, {0,255}),
+    TupleOpts = maps:get({small_tuple_ext, options}, Opts, #{}),
+    NewOpts = maps:merge(Opts, TupleOpts),
+    if Arity >= Min andalso Arity =< Max ->
+            decode_tuple_ext(Arity, Rest, NewOpts, State);
+       true ->
+            {error, [{reason, "small_tuple_ext limits"}], State}
+    end;
 
 %---------------------------------------------------------------------
 % large_tuple_ext => enabled | disabled | {callback, Callback}
@@ -577,11 +592,13 @@ decode(large_big_ext, <<?LARGE_BIG_EXT, Size:32/unsigned-integer, Sign:8/unsigne
 % Wildcard Pattern
 %---------------------------------------------------------------------
 decode(Parser, Rest, Opts, State) ->
-    {error, [{reason, "unsupporter parser"}
-            ,{parser, Parser}
-            ,{rest, Rest}
-            ,{opts, Opts},
-             {state, State}]}.
+    { error
+    , [{reason, "unsupporter parser"}
+      ,{parser, Parser}
+      ,{rest, Rest}
+      ,{opts, Opts},
+       {state, State}]
+    , State}.
 
 decode_test() ->
     [ decode_properties(integer, default_options())
@@ -600,7 +617,10 @@ decode_test() ->
 %% @end
 %%--------------------------------------------------------------------
 property_check(Term, Opts) ->
-    {ok, Term} =:= decode(term_to_binary(Term), Opts).
+    property_check('=:=', Term, Opts).
+
+property_check(Operator, Term, Opts) ->
+    erlang:Operator({ok, Term}, decode(term_to_binary(Term), Opts)).    
 
 %%--------------------------------------------------------------------
 %% @hidden
@@ -730,8 +750,11 @@ decode_tuple_ext(0, Rest, _Opts, #{ tuple_ext := disabled } = _State, _Buffer) -
 decode_tuple_ext(0, Rest, _Opts, _State, Buffer) ->
     {ok, list_to_tuple(lists:reverse(Buffer)), Rest};
 decode_tuple_ext(Arity, Rest, Opts, State, Buffer) ->
-    {ok, Term, Rest2} = decode(Rest, Opts, #state{}),
-    decode_tuple_ext(Arity-1, Rest2, Opts, State, [Term|Buffer]).
+    case decode(Rest, Opts, #state{}) of
+        {ok, Term, Rest2} -> 
+            decode_tuple_ext(Arity-1, Rest2, Opts, State, [Term|Buffer]);
+        Elsewise -> Elsewise
+    end.
 
 %%--------------------------------------------------------------------
 %% @hidden
