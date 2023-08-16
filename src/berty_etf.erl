@@ -244,31 +244,44 @@ decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/b
     Result = ?BINARY_TO_TERM(<<131, ?SMALL_INTEGER_EXT, Integer/integer>>),
     {ok, Result, Rest};
 decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/binary>>
-      , #{ small_integer_ext := {callback, Callback }} = Opts, State) ->
-    Params = [Integer, Rest],
-    case Callback of
-        _ when is_function(Callback) ->
-            apply(Callback, Params);
-        {Module, Function, Args} ->
-            apply(Module, Function, [Params|Args])
-    end;
-decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/binary>>
-      , #{ small_integer_ext := drop }, _State) ->
-    {next, Rest};
-decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/binary>>
       , #{ small_integer_ext := disabled }, _State) ->
     {error, [{reason, "small_integer_ext disabled"}]};
 decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/binary>>
-      , #{ small_integer_ext := enabled }, _State) ->
-    {ok, Integer, Rest};
+      , #{ small_integer_ext := Context }, _State) ->
+    Params = [Integer, Rest],
+    case Context of
+        drop -> {next, Rest};
+        {callback, Callback} 
+          when is_function(Callback) -> 
+            apply(Callback, Params);
+        {Module, Function, Args} -> 
+            apply(Module, Function, [Params|Args]);
+        _Elsewise -> {ok, Integer, Rest}
+    end;
 
 %---------------------------------------------------------------------
 % integer_ext => enabled | disabled | {callback, Callback}
 % integer_ext_limit => {Min, Max}
 %---------------------------------------------------------------------
 decode(integer_ext, <<?INTEGER_EXT, Integer:32/signed-integer, Rest/binary>>
-      , #{ integer_ext := enabled }, _State) ->
-    {ok, Integer, Rest};
+      , #{ integer_ext := cursed }, _State) ->
+    Result = ?BINARY_TO_TERM(<<131, ?INTEGER_EXT, Integer:32/integer>>),
+    {ok, Result, Rest};
+decode(integer_ext, <<?INTEGER_EXT, Integer:32/signed-integer, Rest/binary>>
+      , #{ integer_ext := disabled }, _State) ->
+    {error, [{reason, "integer_ext disabled"}]};
+decode(integer_ext, <<?INTEGER_EXT, Integer:32/signed-integer, Rest/binary>>
+      , #{ integer_ext := Context }, _State) ->
+    Params = [Integer, Rest],
+    case Context of
+        drop -> {next, Rest};
+        {callback, Callback} 
+          when is_function(Callback) -> 
+            apply(Callback, Params);
+        {Module, Function, Args} -> 
+            apply(Module, Function, [Params|Args]);
+        _Elsewise -> {ok, Integer, Rest}
+    end;
 
 %---------------------------------------------------------------------
 % float_ext => enabled | disabled | cursed | {callback, Callback}
@@ -300,10 +313,20 @@ decode(atom_ext, <<?ATOM_EXT, Length:16/unsigned-integer, Rest/binary>>, #{ atom
     <<Atom:Length/binary, Rest2/binary>> = Rest,
     NewAtom = ?BINARY_TO_TERM(<<131, ?ATOM_EXT, Length:16/unsigned-integer, Atom:Length/binary>>),
     {ok, NewAtom, Rest2};
-decode(atom_ext, <<?ATOM_EXT, Length:16/unsigned-integer, Rest/binary>>, Opts, _State) ->
+decode(atom_ext, <<?ATOM_EXT, Length:16/unsigned-integer, Rest/binary>>, #{ atom_ext := Context } = Opts, _State) ->
     <<Atom:Length/binary, Rest2/binary>> = Rest,
-    NewAtom = decode_atoms(Atom, Opts),
-    {ok, NewAtom, Rest2};
+    Params = [Atom, Rest2],
+    case Context of
+        drop -> {next, Rest2};
+        {callback, Callback} 
+          when is_function(Callback) -> 
+            apply(Callback, Params);
+        {Module, Function, Args} -> 
+            apply(Module, Function, [Params|Args]);
+        _Elsewise ->
+            NewAtom = decode_atoms(Atom, Opts),
+            {ok, NewAtom, Rest2}
+    end;
 
 %---------------------------------------------------------------------
 % small_atom_ext => enabled | disabled | cursed | {callback, Callback}
