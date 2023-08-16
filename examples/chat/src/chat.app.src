@@ -1,0 +1,15 @@
+{application, chat,
+ [{description, "A Chat Example build with ranch and berty."},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {mod, {chat_app, []}},
+  {applications,
+   [kernel,
+    stdlib,
+    ranch
+   ]},
+  {env,[]},
+  {modules, []},
+  {licenses, ["MIT"]},
+  {links, []}
+ ]}.
