@@ -225,12 +225,11 @@ decode(<<First:8/unsigned-integer, _/binary>> = Data, Opts, #state{ module = Mod
     end.
 
 %%--------------------------------------------------------------------
-%% @hidden
 %% @doc
-%% @end
 %%
 %% depth => {Min, Max}
 %% size => {Min, Max}
+%% @end
 %%--------------------------------------------------------------------
 
 %---------------------------------------------------------------------
@@ -246,7 +245,7 @@ decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/b
        true ->
             {error, [{reason, "small_integer_ext limits"}], State}
     end;
-decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/binary>>
+decode(small_integer_ext, <<?SMALL_INTEGER_EXT, _Integer/unsigned-integer, _Rest/binary>>
       , #{ small_integer_ext := disabled }, State) ->
     {error, [{reason, "small_integer_ext disabled"}], State};
 decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/binary>>
@@ -275,7 +274,7 @@ decode(integer_ext, <<?INTEGER_EXT, Integer:32/signed-integer, Rest/binary>>
       , #{ integer_ext := cursed }, _State) ->
     Result = ?BINARY_TO_TERM(<<131, ?INTEGER_EXT, Integer:32/integer>>),
     {ok, Result, Rest};
-decode(integer_ext, <<?INTEGER_EXT, Integer:32/signed-integer, Rest/binary>>
+decode(integer_ext, <<?INTEGER_EXT, _Integer:32/signed-integer, _Rest/binary>>
       , #{ integer_ext := disabled }, State) ->
     {error, [{reason, "integer_ext disabled"}], State};
 decode(integer_ext, <<?INTEGER_EXT, Integer:32/signed-integer, Rest/binary>>
@@ -519,7 +518,20 @@ decode(pid_ext, <<?PID_EXT, Rest/binary>>, #{ pid_ext := cursed } = Opts, State)
     {ok, Pid, Rest3};
 
 %---------------------------------------------------------------------
-%
+% @todo to be tested
+% fun_ext has been removed since R23, this implementation only returns
+% the content of the fun, only in cursed mode.
+%---------------------------------------------------------------------
+% decode(fun_ext, <<?FUN_EXT, _NumFree:32/unsigned-integer, Rest/binary>>, #{ fun_ext := cursed } = Opts, State) ->
+%     {ok, Pid, RestPid} = decode(pid_ext, Rest, Opts#{ pid_ext => cursed }, #state{}),
+%     {ok, Module, RestModule} = decode(RestPid, Opts#{ atoms => create }, #state{}),
+%     {ok, Index, RestIndex} = decode(RestModule, Opts, #state{}),
+%     {ok, Uniq, RestUniq} = decode(RestIndex, Opts, #state{}),
+%     {ok, FreeVars, RestFreeVars} = decode(RestUniq, Opts#{ atoms => create }, #state{}),
+%     {ok, {fun_ext, {Pid, Module, Index, Uniq, FreeVars}, RestFreeVars}};
+
+%---------------------------------------------------------------------
+% 
 %---------------------------------------------------------------------
 decode(new_pid_ext, <<?NEW_PID_EXT, Rest/binary>>
       ,#{ new_pid_ext := cursed } = Opts, State) ->
@@ -545,48 +557,73 @@ decode(new_pid_ext, <<?NEW_PID_EXT, Rest/binary>>
 %---------------------------------------------------------------------
 % @todo to be tested
 %---------------------------------------------------------------------
-decode(new_reference_ext, <<?NEW_REFERENCE_EXT, Length:16/unsigned-integer, Rest/binary>>
-      ,#{ new_reference_ext := cursed } = Opts, State) ->
-    {ok, _Node, Rest2} = decode(atom_ext, Rest, Opts#{ atoms => create }, State),
-    <<Creation:8/unsigned-integer, Rest3/binary>> = Rest2,
-    <<IDs:(4*Length)/binary, Rest4/binary>> = Rest3,
-    IDSeq = lists:reverse([ ID || <<ID:32/unsigned-integer>> <= IDs ]),
-    Format = io_lib:format("#Ref<~B.~B.~B.~B>", [Creation|IDSeq]),
-    RefString = lists:flatten(Format),
-    {ok, list_to_ref(RefString), Rest4};
+% decode(new_reference_ext, <<?NEW_REFERENCE_EXT, Length:16/unsigned-integer, Rest/binary>>
+%       ,#{ new_reference_ext := cursed } = Opts, State) ->
+%     {ok, _Node, Rest2} = decode(atom_ext, Rest, Opts#{ atoms => create }, State),
+%     <<Creation:8/unsigned-integer, Rest3/binary>> = Rest2,
+%     <<IDs:(4*Length)/binary, Rest4/binary>> = Rest3,
+%     IDSeq = lists:reverse([ ID || <<ID:32/unsigned-integer>> <= IDs ]),
+%     Format = io_lib:format("#Ref<~B.~B.~B.~B>", [Creation|IDSeq]),
+%     RefString = lists:flatten(Format),
+%     {ok, list_to_ref(RefString), Rest4};
 
 %---------------------------------------------------------------------
 % @todo to cleanup this mess
 %---------------------------------------------------------------------
-decode(newer_reference_ext, <<?NEWER_REFERENCE_EXT, Length:16/unsigned-integer, Rest/binary>>
-      ,#{ newer_reference_ext := cursed } = Opts, State) ->
-    {ok, _Node, Rest2} = decode(atom_ext, Rest, Opts#{ atoms => create }, State),
-    <<Creation:32/unsigned-integer, Rest3/binary>> = Rest2,
-    <<IDs:(4*Length)/binary, Rest4/binary>> = Rest3,
-    IDSeq = lists:reverse([ ID || <<ID:32/unsigned-integer>> <= IDs ]),
-    Format = io_lib:format("#Ref<~B.~B.~B.~B>", [Creation|IDSeq]),
-    RefString = lists:flatten(Format),
-    {ok, list_to_ref(RefString), Rest4};
+% decode(newer_reference_ext, <<?NEWER_REFERENCE_EXT, Length:16/unsigned-integer, Rest/binary>>
+%       ,#{ newer_reference_ext := cursed } = Opts, State) ->
+%     {ok, _Node, Rest2} = decode(atom_ext, Rest, Opts#{ atoms => create }, State),
+%     <<Creation:32/unsigned-integer, Rest3/binary>> = Rest2,
+%     <<IDs:(4*Length)/binary, Rest4/binary>> = Rest3,
+%     IDSeq = lists:reverse([ ID || <<ID:32/unsigned-integer>> <= IDs ]),
+%     Format = io_lib:format("#Ref<~B.~B.~B.~B>", [Creation|IDSeq]),
+%     RefString = lists:flatten(Format),
+%     {ok, list_to_ref(RefString), Rest4};
 
 %---------------------------------------------------------------------
 %
 %---------------------------------------------------------------------
 decode(small_big_ext, <<?SMALL_BIG_EXT, Size:8/unsigned-integer, Sign:8/unsigned-integer, Rest/binary>>
-      , #{ small_big_ext := cursed } = Opts, _State) ->
+      , #{ small_big_ext := cursed } = _Opts, _State) ->
     <<Value:Size/binary, Rest2/binary>> = Rest,
-    Bignum = binary_to_term(<<131, ?SMALL_BIG_EXT, Size:8/unsigned-integer
-                             ,Sign:8/unsigned-integer, Value:Size/binary>>, []),
+    Bignum = ?BINARY_TO_TERM(<<131, ?SMALL_BIG_EXT, Size:8/unsigned-integer
+                              ,Sign:8/unsigned-integer, Value:Size/binary>>),
     {ok, Bignum, Rest2};
 
 %---------------------------------------------------------------------
 %
 %---------------------------------------------------------------------
 decode(large_big_ext, <<?LARGE_BIG_EXT, Size:32/unsigned-integer, Sign:8/unsigned-integer, Rest/binary>>
-      , #{ large_big_ext := cursed } = Opts, _State) ->
+      , #{ large_big_ext := cursed } = _Opts, _State) ->
     <<Value:Size/binary, Rest2/binary>> = Rest,
-    Bignum = binary_to_term(<<131, ?LARGE_BIG_EXT, Size:32/unsigned-integer
-                             ,Sign:8/unsigned-integer, Value:Size/binary>>, []),
+    Bignum = ?BINARY_TO_TERM(<<131, ?LARGE_BIG_EXT, Size:32/unsigned-integer
+                              ,Sign:8/unsigned-integer, Value:Size/binary>>),
     {ok, Bignum, Rest2};
+
+%---------------------------------------------------------------------
+%
+%---------------------------------------------------------------------
+decode(export_ext, <<?EXPORT_EXT, Rest/binary>>, #{ export_ext := enabled } = Opts, _State) ->
+    ExportExtOpts = maps:get(export_ext_options, Opts, Opts),
+    {ok, Module, RestModule} = decode(atom_ext, Rest, ExportExtOpts, #state{}),
+    {ok, Function, RestFunction} = decode(atom_ext, RestModule, ExportExtOpts, #state{}),
+    {ok, Arity, RestArity} = decode(small_integer_ext, RestFunction, Opts, #state{}),
+    case {is_atom(Module), is_atom(Function)} of
+        {true, true} ->
+            {ok, fun Module:Function/Arity, RestArity};
+        {_,_} ->
+            {ok, {export_ext, {Module, Function, Arity}, RestArity}}
+    end;
+
+%---------------------------------------------------------------------
+% 
+%---------------------------------------------------------------------
+decode(new_fun_ext, <<?NEW_FUN_EXT, Size:32/unsigned-integer, Rest/binary>>
+      , #{ new_fun_ext := cursed } = _Opts, _State) ->
+    RealSize = Size-4,
+    <<Payload:RealSize/binary, Rest2/binary>> = Rest,
+    Fun = ?BINARY_TO_TERM(<<131, ?NEW_FUN_EXT,  Size:32/unsigned-integer, Payload:RealSize/binary>>),
+    {ok, Fun, Rest2};
 
 %---------------------------------------------------------------------
 % Wildcard Pattern
@@ -688,7 +725,7 @@ decode_properties(map, Opts) ->
     Maps = map(Elements, Elements),
     Keys = union([integer(), string(), binary(), Tuples, Lists, Maps]),
     Values = union([integer(), string(), binary(), Tuples, Lists, Maps]),
-    proper:quickcheck(?FORALL( {Key, Value} = Map
+    proper:quickcheck(?FORALL( Map
                              , {Keys, Values}
                              , property_check(Map, Opts)
                              )

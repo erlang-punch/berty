@@ -19,7 +19,7 @@ production yet.
 Primary features:
 
  - [x] High level implementation of ETF in pure Erlang
- - [ ] Atoms protection and limitation
+ - [x] Atoms protection and limitation
  - [ ] Fine grained filtering based on type
  - [ ] Callback function or MFA
  - [ ] Fallback to `binary_to_term` function on demand
@@ -45,6 +45,7 @@ Secondary features:
  - [ ] Custom parser subset based on behaviors
  - [ ] ETF as stream of data
  - [ ] Usage example with ETF, BERT and/or custom parser
+ - [ ] Low level optimization (optimized module with merl)
 
 ## Usage
 
