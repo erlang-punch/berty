@@ -2,6 +2,44 @@
 %%% @copyright Erlang Punch
 %%% @author Mathieu Kerjouan
 %%% @doc
+%%%
+%%% This module is the one used to decode (and encode in a near
+%%% future) Erlang External Term Format. By default, only a small
+%%% subset of ETF. By default, it works like `binary_to_term/1` and
+%%% `binary_to_term/2` functions.
+%%%
+%%% ```
+%%% % decoding simple term with default configuration
+%%% {ok, {1,2}} = berty:decode(term_to_binary({1,2}).
+%%% '''
+%%%
+%%% A term can be decoded in many different ways.
+%%%
+%%% <ul>
+%%%   <li>`enabled': use a default and safe method to decode a term</li>
+%%%   <li>`disabled': stop the parser</li>
+%%%   <li>`cursed': use `binary_to_term/2' function with `[safe]' option</li>
+%%%   <li>`{callback, Callback}': use a lambda function with arity 4
+%%%       or a module/function tuple `{Module, Function}'</li>
+%%%   <li>`drop': just drop the term and do the next one</li>
+%%% </ul>
+%%%
+%%% ```
+%%% % define a callback function
+%%% Fun = fun(RawTerm, Rest, Opts, State) ->
+%%%   {ok, unsupported, Rest}
+%%% end.
+%%% 
+%%% % use the callback function to decode small_integers
+%%% Opts = #{ small_integer_ext => {callback, Fun}.
+%%% {ok, {unsupported, unsupported}}
+%%%   = berty:decode(term_to_binary({1,2}, Opts).
+%%% '''
+%%%
+%%% == Atoms Protection ==
+%%%
+%%% == Memory Protection ==
+%%%
 %%% @end
 %%%===================================================================
 -module(berty_etf).
@@ -252,15 +290,14 @@ decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/b
       , #{ small_integer_ext := Context } = Opts, State) ->
     {Min, Max} = maps:get({small_integer_ext, limit}, Opts, {0,255}),
     if Integer >= Min andalso Integer =< Max ->
-            Params = [Integer, Rest],
             case Context of
-                drop -> {next, Rest};
-                {callback, Callback} 
-                  when is_function(Callback) -> 
-                    apply(Callback, Params);
-                {Module, Function, Args} -> 
-                    apply(Module, Function, [Params|Args]);
-                _Elsewise -> {ok, Integer, Rest}
+                drop -> 
+                    {next, Rest};
+                {callback, Callback}  -> 
+                    RawTerm = <<?SMALL_INTEGER_EXT, Integer/unsigned-integer>>,
+                    decode_callback(Callback, RawTerm, Rest, Opts, State);
+                _Elsewise -> 
+                    {ok, Integer, Rest}
             end;
        true ->
             {error, [{reason, "small_integer_ext limits"}], State}
@@ -278,16 +315,20 @@ decode(integer_ext, <<?INTEGER_EXT, _Integer:32/signed-integer, _Rest/binary>>
       , #{ integer_ext := disabled }, State) ->
     {error, [{reason, "integer_ext disabled"}], State};
 decode(integer_ext, <<?INTEGER_EXT, Integer:32/signed-integer, Rest/binary>>
-      , #{ integer_ext := Context }, _State) ->
-    Params = [Integer, Rest],
-    case Context of
-        drop -> {next, Rest};
-        {callback, Callback} 
-          when is_function(Callback) -> 
-            apply(Callback, Params);
-        {Module, Function, Args} -> 
-            apply(Module, Function, [Params|Args]);
-        _Elsewise -> {ok, Integer, Rest}
+      , #{ integer_ext := Context } = Opts, State) ->
+    {Min, Max} = maps:get({small_integer_ext, limit}, Opts, {-2147483648,2147483647}),
+    if Integer >= Min andalso Integer =< Max ->
+            case Context of
+                drop -> 
+                    {next, Rest};
+                {callback, Callback} ->
+                    RawTerm = <<?INTEGER_EXT, Integer:32/signed-integer>>,
+                    decode_callback(Callback, RawTerm, Rest, Opts, State);
+                _Elsewise -> 
+                    {ok, Integer, Rest}
+            end;
+       true ->
+            {error, [{reason, "integer_ext limits"}]}
     end;
 
 %---------------------------------------------------------------------
@@ -297,39 +338,63 @@ decode(integer_ext, <<?INTEGER_EXT, Integer:32/signed-integer, Rest/binary>>
 decode(float_ext, <<?FLOAT_EXT, Float:31/binary, Rest/binary>>, #{ minor_version := 0, float_ext := cursed }, _State) ->
     Result = ?BINARY_TO_TERM(<<131, ?FLOAT_EXT, Float:31/binary>>),
     {ok, Result, Rest};
-decode(float_ext, <<?FLOAT_EXT, Float:31/binary, Rest/binary>>, #{ minor_version := 0 }, _State) ->
-    NewFloat = binary_to_float(Float),
-    {ok, NewFloat, Rest};
+decode(float_ext, <<?FLOAT_EXT, Float:31/binary, Rest/binary>>
+      , #{ minor_version := 0, float_ext := Context } = Opts, State) ->
+    case Context of
+        drop ->
+            {next, Rest};
+        {callback, Callback} ->
+            RawTerm = <<?FLOAT_EXT, Float:31/binary>>,
+            decode_callback(Callback, RawTerm, Rest, Opts, State);
+        enabled ->
+            NewFloat = binary_to_float(Float),
+            {ok, NewFloat, Rest};
+        _ ->
+            {error, [{reason, unsupported}]}
+    end;
 
 %---------------------------------------------------------------------
 % new_float_ext => enabled | disabled | cursed | {callback, Callback}
 % new_float_ext_limit => {Min, Max}
 %---------------------------------------------------------------------
-decode(new_float_ext, <<?NEW_FLOAT_EXT, Float:8/binary, Rest/binary>>, #{ new_float_ext := cursed }, _State) ->
+decode(new_float_ext, <<?NEW_FLOAT_EXT, Float:8/binary, Rest/binary>>
+      , #{ new_float_ext := cursed }, _State) ->
     Result = ?BINARY_TO_TERM(<<131, ?NEW_FLOAT_EXT, Float/binary>>),
     {ok, Result, Rest};
+decode(new_float_ext, <<?NEW_FLOAT_EXT, Float:8/binary, Rest/binary>>
+      , #{ new_float_ext := Context } = Opts, State) ->
+    case Context of
+        drop ->
+            {next, Rest};
+        {callback, Callback} ->
+            RawTerm = <<?NEW_FLOAT_EXT, Float:8/binary>>,
+            decode_callback(Callback, RawTerm, Rest, Opts, State);
+        _ ->
+            {error, [{reason, unsupported}]}
+    end;
 
 %---------------------------------------------------------------------
 % atom_ext => enabled | disabled | cursed | {callback, Callback}
 % atom_ext_size => {Min, Max}
 %---------------------------------------------------------------------
-decode(atom_ext, <<?ATOM_EXT, Length:16/unsigned-integer, Rest/binary>>, #{ atom_ext := disabled }, _State) ->
+decode(atom_ext, <<?ATOM_EXT, Length:16/unsigned-integer, Rest/binary>>
+      , #{ atom_ext := disabled }, _State) ->
     <<_Atom:Length/binary, Rest2/binary>> = Rest,
     {next, Rest2};
-decode(atom_ext, <<?ATOM_EXT, Length:16/unsigned-integer, Rest/binary>>, #{ atom_ext := cursed }, _State) ->
+decode(atom_ext, <<?ATOM_EXT, Length:16/unsigned-integer, Rest/binary>>
+      , #{ atom_ext := cursed }, _State) ->
     <<Atom:Length/binary, Rest2/binary>> = Rest,
     NewAtom = ?BINARY_TO_TERM(<<131, ?ATOM_EXT, Length:16/unsigned-integer, Atom:Length/binary>>),
     {ok, NewAtom, Rest2};
-decode(atom_ext, <<?ATOM_EXT, Length:16/unsigned-integer, Rest/binary>>, #{ atom_ext := Context } = Opts, _State) ->
+decode(atom_ext, <<?ATOM_EXT, Length:16/unsigned-integer, Rest/binary>>
+      , #{ atom_ext := Context } = Opts, State) ->
     <<Atom:Length/binary, Rest2/binary>> = Rest,
-    Params = [Atom, Rest2],
     case Context of
-        drop -> {next, Rest2};
-        {callback, Callback} 
-          when is_function(Callback) -> 
-            apply(Callback, Params);
-        {Module, Function, Args} -> 
-            apply(Module, Function, [Params|Args]);
+        drop -> 
+            {next, Rest2};
+        {callback, Callback} ->
+            RawTerm = <<?ATOM_EXT, Length:16/unsigned-integer, Atom:Length/binary>>,
+            decode_callback(Callback, RawTerm, Rest, Opts, State);
         _Elsewise ->
             NewAtom = decode_atoms(Atom, Opts),
             {ok, NewAtom, Rest2}
@@ -619,11 +684,19 @@ decode(export_ext, <<?EXPORT_EXT, Rest/binary>>, #{ export_ext := enabled } = Op
 % 
 %---------------------------------------------------------------------
 decode(new_fun_ext, <<?NEW_FUN_EXT, Size:32/unsigned-integer, Rest/binary>>
-      , #{ new_fun_ext := cursed } = _Opts, _State) ->
+      , #{ new_fun_ext := Mode } = Opts, State) ->
     RealSize = Size-4,
     <<Payload:RealSize/binary, Rest2/binary>> = Rest,
-    Fun = ?BINARY_TO_TERM(<<131, ?NEW_FUN_EXT,  Size:32/unsigned-integer, Payload:RealSize/binary>>),
-    {ok, Fun, Rest2};
+    case Mode of
+        {callback, Callback} ->
+            RawTerm = <<?NEW_FUN_EXT, Size:32/unsigned-integer, Payload:RealSize/binary>>,
+            decode_callback(Callback, RawTerm, Rest2, Opts, State);
+        cursed -> 
+            Fun = ?BINARY_TO_TERM(<<131, ?NEW_FUN_EXT,  Size:32/unsigned-integer, Payload:RealSize/binary>>),
+            {ok, Fun, Rest2};
+        disabled ->
+            {error, [{reason, "new_fun_ext disabled"}], State}
+    end;
 
 %---------------------------------------------------------------------
 % Wildcard Pattern
@@ -850,3 +923,31 @@ decode_map_ext(Arity, Rest, Opts, State, Buffer) ->
     {ok, Key, RestKey} = decode(Rest, Opts, #state{}),
     {ok, Value, RestValue} = decode(RestKey, Opts, #state{}),
     decode_map_ext(Arity-1, RestValue, Opts, State, Buffer#{ Key => Value }).
+
+
+%%--------------------------------------------------------------------
+%% @hidden
+%% @doc This function is used to deal with callback
+%%
+%% @end
+%%--------------------------------------------------------------------
+-spec decode_callback(Callback, RawTerm, Rest, Opts, State) -> Return when
+      Callback :: function() 
+                | {Module, Function},
+      Module :: atom(),
+      Function :: atom(),
+      RawTerm :: binary(),
+      Rest :: binary(),
+      Opts :: map(),
+      State :: #state{},
+      Return :: {ok, Term, Rest}
+              | {error, Reason},
+      Term :: term(),
+      Reason :: term().
+
+decode_callback(Callback, RawTerm, Rest, Opts, State)
+  when is_function(Callback) ->
+    apply(Callback, [RawTerm, Rest, Opts, State]);
+decode_callback({Module, Function}, RawTerm, Rest, Opts, State) 
+  when is_atom(Module) andalso is_atom(Function) ->
+    apply(Module, Function, [RawTerm, Rest, Opts, State]).
