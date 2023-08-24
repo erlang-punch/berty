@@ -38,6 +38,13 @@
 %%%
 %%% == Atoms Protection ==
 %%%
+%%% Different kind of atoms can be supported and protected. If a
+%%% global protection is required, `atoms` option is probably what you
+%%% are looking for.
+%%%
+%%% ```
+%%% '''
+%%%
 %%% == Memory Protection ==
 %%%
 %%% @end
@@ -62,6 +69,7 @@
                }).
 
 %%--------------------------------------------------------------------
+%% @hidden
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
@@ -119,7 +127,7 @@ default_options() ->
      , map_ext => enabled
      }.
 
--type callback_option() :: {callback, function() | {atom(), atom(), [term(), ...]}}.
+-type callback_option() :: {callback, function() | {atom(), atom()}}.
 -type limit_option() :: {number(), number()}.
 -type atom_ext() :: enabled | disabled | cursed | callback_option().
 -type atom_ext_size() :: limit_option().
@@ -242,8 +250,7 @@ decode(<<131, Data/binary>> = _Payload, Opts) ->
         {ok, Term, <<>>} -> {ok, Term};
         {next, Rest} -> decode(Rest, NewOpts, State);
         {error, Reason, ErrorState} ->
-            ?LOG_ERROR("~p", [{Reason, ErrorState}]),
-            {error, Reason};
+            decode_error(Reason, NewOpts, State);
         Elsewise ->
             Elsewise
     end.
@@ -281,11 +288,13 @@ decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/b
             Result = ?BINARY_TO_TERM(<<131, ?SMALL_INTEGER_EXT, Integer/integer>>),
             {ok, Result, Rest};
        true ->
-            {error, [{reason, "small_integer_ext limits"}], State}
+            Reason = [{reason, "small_integer_ext limits"}],
+            decode_error(Reason, Opts, State)
     end;
 decode(small_integer_ext, <<?SMALL_INTEGER_EXT, _Integer/unsigned-integer, _Rest/binary>>
-      , #{ small_integer_ext := disabled }, State) ->
-    {error, [{reason, "small_integer_ext disabled"}], State};
+      , #{ small_integer_ext := disabled } = Opts, State) ->
+    Reason = [{reason, "small_integer_ext disabled"}],
+    decode_error(Reason, Opts, State);
 decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/binary>>
       , #{ small_integer_ext := Context } = Opts, State) ->
     {Min, Max} = maps:get({small_integer_ext, limit}, Opts, {0,255}),
@@ -300,6 +309,7 @@ decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/b
                     {ok, Integer, Rest}
             end;
        true ->
+
             {error, [{reason, "small_integer_ext limits"}], State}
     end;
 
@@ -328,7 +338,8 @@ decode(integer_ext, <<?INTEGER_EXT, Integer:32/signed-integer, Rest/binary>>
                     {ok, Integer, Rest}
             end;
        true ->
-            {error, [{reason, "integer_ext limits"}]}
+            Reason = [{reason, "small_integer_ext limits"}],
+            decode_error(Reason, Opts, State)
     end;
 
 %---------------------------------------------------------------------
@@ -350,7 +361,8 @@ decode(float_ext, <<?FLOAT_EXT, Float:31/binary, Rest/binary>>
             NewFloat = binary_to_float(Float),
             {ok, NewFloat, Rest};
         _ ->
-            {error, [{reason, unsupported}]}
+            Reason = [{reason, "integer_ext unsupported"}],
+            decode_error(Reason, Opts, State)
     end;
 
 %---------------------------------------------------------------------
@@ -951,3 +963,18 @@ decode_callback(Callback, RawTerm, Rest, Opts, State)
 decode_callback({Module, Function}, RawTerm, Rest, Opts, State) 
   when is_atom(Module) andalso is_atom(Function) ->
     apply(Module, Function, [RawTerm, Rest, Opts, State]).
+
+%%--------------------------------------------------------------------
+%%
+%%--------------------------------------------------------------------
+decode_error(Reason, #{ errors := Error } = _Opts, State) ->
+    Message = {error, Reason, State},
+    ?LOG_ERROR("~p", [Message]),
+    case Error of
+        _ ->
+            Message
+    end.
+
+
+    
+    
