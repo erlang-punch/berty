@@ -43,7 +43,7 @@ Secondary features:
  - [ ] ETF path
  - [ ] ETF schema
  - [ ] Custom parser subset based on behaviors
- - [ ] ETF as stream of data
+ - [x] ETF as stream of data
  - [ ] Usage example with ETF, BERT and/or custom parser
  - [ ] Low level optimization (optimized module with merl)
 

@@ -28,6 +28,11 @@
 %%%
 %%% At this time only `passive' mode is enabled.
 %%%
+%%%
+%%% @TODO create an active version, to help developers to deal with
+%%%       blocking system. Example: a probe using serialize
+%%%       communication
+%%% @TODO add support for ETS
 %%% @end
 %%%===================================================================
 -module(berty_stream).
@@ -58,6 +63,7 @@
 
 %%--------------------------------------------------------------------
 %% @doc
+%% @see start/1
 %% @end
 %%--------------------------------------------------------------------
 start() ->
@@ -65,13 +71,14 @@ start() ->
 
 %%--------------------------------------------------------------------
 %% @doc
+%% @see start/2
 %% @end
 %%--------------------------------------------------------------------
 start(Args) ->
     start(Args, []).
 
 %%--------------------------------------------------------------------
-%% @doc
+%% @doc start a new berty_stream process.
 %% @end
 %%--------------------------------------------------------------------
 start(Args, Opts) ->
@@ -208,7 +215,10 @@ passive(Event, Message, State) ->
     {keep_state, State}.
 
 %%--------------------------------------------------------------------
-%%
+%% @hidden
+%% @doc
+%% @TODO cleanup this part of the code.x
+%% @end
 %%--------------------------------------------------------------------
 decoder(Message, #?MODULE{ payload = Payload, decoder = Decoder } = State) ->
     ?LOG_INFO("~p~n", [{info, Message, Payload, State}]),
