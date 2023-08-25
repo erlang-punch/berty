@@ -271,6 +271,7 @@ decode(<<First:8/unsigned-integer, _/binary>> = Data, Opts, #state{ module = Mod
 %---------------------------------------------------------------------
 % small_integer_ext => enabled | disabled | {callback, Callback}
 % small_integer_ext_limit => {Min, Max}
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#small_integer_ext
 %---------------------------------------------------------------------
 decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/binary>>
       , #{ small_integer_ext := cursed } = Opts, State) ->
@@ -302,20 +303,25 @@ decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/b
                     {ok, Integer, Rest}
             end;
        true ->
-            {error, [{reason, "small_integer_ext limits"}], State}
+            Reason = [{reason, "small_integer_ext limits"}],
+            decode_error(Reason, Opts, State)
     end;
+decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/binary>>, _Opts, _State) ->
+    {ok, Integer, Rest};
 
 %---------------------------------------------------------------------
 % integer_ext => enabled | disabled | {callback, Callback}
 % integer_ext_limit => {Min, Max}
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#integer_ext
 %---------------------------------------------------------------------
 decode(integer_ext, <<?INTEGER_EXT, Integer:32/signed-integer, Rest/binary>>
       , #{ integer_ext := cursed }, _State) ->
     Result = ?BINARY_TO_TERM(<<131, ?INTEGER_EXT, Integer:32/integer>>),
     {ok, Result, Rest};
 decode(integer_ext, <<?INTEGER_EXT, _Integer:32/signed-integer, _Rest/binary>>
-      , #{ integer_ext := disabled }, State) ->
-    {error, [{reason, "integer_ext disabled"}], State};
+      , #{ integer_ext := disabled } = Opts, State) ->
+    Reason = [{reason, "integer_ext disabled"}],
+    decode_error(Reason, Opts, State);
 decode(integer_ext, <<?INTEGER_EXT, Integer:32/signed-integer, Rest/binary>>
       , #{ integer_ext := Context } = Opts, State) ->
     {Min, Max} = maps:get({small_integer_ext, limit}, Opts, {-2147483648,2147483647}),
@@ -328,17 +334,20 @@ decode(integer_ext, <<?INTEGER_EXT, Integer:32/signed-integer, Rest/binary>>
                 {callback, Callback} ->
                     RawTerm = <<?INTEGER_EXT, Integer:32/signed-integer>>,
                     decode_callback(Callback, RawTerm, Rest, Opts, State);
-                _Elsewise ->
+                _ ->
                     {ok, Integer, Rest}
             end;
        true ->
             Reason = [{reason, "small_integer_ext limits"}],
             decode_error(Reason, Opts, State)
     end;
+decode(integer_ext, <<?INTEGER_EXT, Integer:32/signed-integer, Rest/binary>>, _Opts, _State) ->
+    {ok, Integer, Rest};
 
 %---------------------------------------------------------------------
 % float_ext => enabled | disabled | cursed | {callback, Callback}
 % float_ext_limit => {Min, Max}
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#float_ext
 %---------------------------------------------------------------------
 decode(float_ext, <<?FLOAT_EXT, Float:31/binary, Rest/binary>>
       , #{ minor_version := 0, float_ext := cursed }, _State) ->
@@ -365,6 +374,7 @@ decode(float_ext, <<?FLOAT_EXT, Float:31/binary, Rest/binary>>
 %---------------------------------------------------------------------
 % new_float_ext => enabled | disabled | cursed | {callback, Callback}
 % new_float_ext_limit => {Min, Max}
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#new_float_ext
 %---------------------------------------------------------------------
 decode(new_float_ext, <<?NEW_FLOAT_EXT, Float:8/binary, Rest/binary>>
       , #{ new_float_ext := cursed }, _State) ->
@@ -381,12 +391,33 @@ decode(new_float_ext, <<?NEW_FLOAT_EXT, Float:8/binary, Rest/binary>>
             RawTerm = <<?NEW_FLOAT_EXT, Float:8/binary>>,
             decode_callback(Callback, RawTerm, Rest, Opts, State);
         _ ->
-            {error, [{reason, unsupported}]}
+            Reason = [{reason, "new_float_ext disabled"}],
+            decode_error(Reason, Opts, State)
+    end;
+
+%---------------------------------------------------------------------
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#atom_cache_ref
+%---------------------------------------------------------------------
+decode(atom_cache_ref, <<?ATOM_CACHE_REF, Index, Rest/binary>>, #{ atom_cache_ref := Context } = Opts, State) ->
+    case Context of
+        drop -> 
+            {next, Rest};
+        raw ->
+            {raw, <<Index>>, Rest};
+        {callback, Callback} ->
+            decode_callback(Callback, <<?ATOM_CACHE_REF, Index>>, Rest, Opts, State);
+        cursed ->
+            AtomCacheRef = ?BINARY_TO_TERM(<<131, ?ATOM_CACHE_REF, Index>>),
+            {ok, AtomCacheRef, Rest};
+        _ ->
+            Reason = [{reason, "atom_cache_ref disabled"}],
+            decode_error(Reason, Opts, State)
     end;
 
 %---------------------------------------------------------------------
 % atom_ext => enabled | disabled | cursed | {callback, Callback}
 % atom_ext_size => {Min, Max}
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#atom_ext--deprecated-
 %---------------------------------------------------------------------
 decode(atom_ext, <<?ATOM_EXT, Length:16/unsigned-integer, Rest/binary>>
       , #{ atom_ext := disabled }, _State) ->
@@ -416,6 +447,7 @@ decode(atom_ext, <<?ATOM_EXT, Length:16/unsigned-integer, Rest/binary>>
 %---------------------------------------------------------------------
 % small_atom_ext => enabled | disabled | cursed | {callback, Callback}
 % small_atom_ext_size => {Min, Max}
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#small_atom_ext--deprecated-
 %---------------------------------------------------------------------
 decode(small_atom_ext, <<?SMALL_ATOM_EXT, Length:8/unsigned-integer, Rest/binary>>
       , #{ small_atom_ext := disabled }, _State) ->
@@ -445,6 +477,7 @@ decode(small_atom_ext, <<?SMALL_ATOM_EXT, Length:8/unsigned-integer, Rest/binary
 %---------------------------------------------------------------------
 % small_atom_utf8_ext => enabled | disabled | cursed | {callback, Callback}
 % small_atom_utf8_ext_size => {Min, Max}
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#small_atom_utf8_ext
 %---------------------------------------------------------------------
 decode(small_atom_utf8_ext, <<?SMALL_ATOM_UTF8_EXT, Length:8/unsigned-integer, Rest/binary>>
       , #{ small_atom_utf8_ext := disabled }, _State) ->
@@ -481,6 +514,7 @@ decode(small_atom_utf8_ext, <<?SMALL_ATOM_UTF8_EXT, Length:8/unsigned-integer, R
 %          | existing
 % atom_utf8_ext => enabled | disabled | cursed | {callback, Callback}
 % atom_utf8_ext_size => {Min, Max}
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#atom_utf8_ext
 %---------------------------------------------------------------------
 decode(atom_utf8_ext, <<?ATOM_UTF8_EXT, Length:16/unsigned-integer, Rest/binary>>
       , #{ atom_utf8_ext := disabled }, _State) ->
@@ -511,6 +545,7 @@ decode(atom_utf8_ext, <<?ATOM_UTF8_EXT, Length:16/unsigned-integer, Rest/binary>
 % small_tuple_ext => enabled | disabled | {callback, Callback}
 % small_tuple_ext_arity => {Min, Max}
 % small_tuple_ext_options => #{} % overwrite main options
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#small_tuple_ext
 %---------------------------------------------------------------------
 decode(small_tuple_ext, <<?SMALL_TUPLE_EXT, 0/unsigned-integer, Rest/binary>>, _, _State) ->
     {ok, {}, Rest};
@@ -521,13 +556,15 @@ decode(small_tuple_ext, <<?SMALL_TUPLE_EXT, Arity/unsigned-integer, Rest/binary>
     if Arity >= Min andalso Arity =< Max ->
             decode_tuple_ext(Arity, Rest, NewOpts, State);
        true ->
-            {error, [{reason, "small_tuple_ext limits"}], State}
+            Reason = [{reason, "small_tuple_ext limits"}], 
+            decode_error(Reason, Opts, State)
     end;
 
 %---------------------------------------------------------------------
 % large_tuple_ext => enabled | disabled | {callback, Callback}
 % large_tuple_ext_arity => {Min, Max}
 % large_tuple_ext_options => #{} % overwrite main options
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#large_tuple_ext
 %---------------------------------------------------------------------
 decode(large_tuple_ext, <<?LARGE_TUPLE_EXT, 0:32/unsigned-integer, Rest/binary>>, _, _State) ->
     {ok, {}, Rest};
@@ -538,6 +575,7 @@ decode(large_tuple_ext, <<?LARGE_TUPLE_EXT, Arity:32/unsigned-integer, Rest/bina
 % string_ext => enabled | disabled | {callback, Callback}
 % string_ext_length => {Min, Max}
 % string_ext_options => #{} % overwrite main options
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#string_ext
 %---------------------------------------------------------------------
 decode(string_ext, <<?STRING_EXT, 0:16/unsigned-integer, Rest/binary>>, _Opts, _State) ->
     {ok, "", Rest};
@@ -546,6 +584,7 @@ decode(string_ext, <<?STRING_EXT, Length:16/unsigned-integer, Rest/binary>>, Opt
 
 %---------------------------------------------------------------------
 % nil_ext => enabled | disabled | {callback, Callback}
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#nil_ext
 %---------------------------------------------------------------------
 decode(nil_ext, <<?NIL_EXT, Rest/binary>>, _Opts, _State) ->
     {ok, [], Rest};
@@ -554,6 +593,7 @@ decode(nil_ext, <<?NIL_EXT, Rest/binary>>, _Opts, _State) ->
 % list_ext => enabled | disabled | {callback, Callback}
 % list_ext_length => {Min, Max}
 % list_ext_options = #{} % overwrite main options
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#list_ext
 %---------------------------------------------------------------------
 decode(list_ext, <<?LIST_EXT, 0:32/unsigned-integer, Rest/binary>>, _Opts, _State) ->
     {ok, [], Rest};
@@ -563,6 +603,7 @@ decode(list_ext, <<?LIST_EXT, Length:32/unsigned-integer, Rest/binary>>, Opts, S
 %---------------------------------------------------------------------
 % binary_ext => enabled | disabled | cursed | {callback, Callback}
 % binary_ext_size => {Min, Max}
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#binary_ext
 %---------------------------------------------------------------------
 decode(binary_ext, <<?BINARY_EXT, Size:32/unsigned-integer, Rest/binary>>
       , #{ binary_ext := cursed } = _Opts, _State) ->
@@ -588,6 +629,7 @@ decode(binary_ext, <<?BINARY_EXT, Size:32/unsigned-integer, Rest/binary>>
 %---------------------------------------------------------------------
 % bit_binary_ext => enabled | disabled | {callback, Callback}
 % bit_binary_ext_size => {Min, Max}
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#bit_binary_ext
 %---------------------------------------------------------------------
 decode(bit_binary_ext, <<?BIT_BINARY_EXT, Size:32/unsigned-integer, Bits:8, Rest/binary>>
       , #{ bit_binary_ext := cursed } = _Opts, _State) ->
@@ -619,12 +661,13 @@ decode(bit_binary_ext, <<?BIT_BINARY_EXT, Size:32/unsigned-integer, Bits:8, Rest
 % map_ext_length => {Min, Max}
 % map_ext_key_options => #{} % overwrite main options
 % map_ext_value_options => #{} % overwrite main options
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#map_ext
 %---------------------------------------------------------------------
 decode(map_ext, <<?MAP_EXT, Arity:32/unsigned-integer, Rest/binary>>, Opts, State) ->
     decode_map_ext(Arity, Rest, Opts, State);
 
 %---------------------------------------------------------------------
-%
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#port_ext
 %---------------------------------------------------------------------
 decode(port_ext, <<?PORT_EXT, Rest/binary>>, #{ port_ext := cursed } = Opts, State) ->
     {ok, _Node, Rest2} = decode(atom_ext, Rest, Opts#{ atoms => create }, State),
@@ -650,7 +693,7 @@ decode(port_ext, <<?PORT_EXT, Rest/binary>>, #{ port_ext := Context } = Opts, St
     end;
 
 %---------------------------------------------------------------------
-%
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#new_port_ext
 %---------------------------------------------------------------------
 decode(new_port_ext, <<?NEW_PORT_EXT, Rest/binary>>, #{ new_port_ext := cursed } = Opts, State) ->
     {ok, _Node, Rest2} = decode(atom_ext, Rest, Opts#{ atoms => create }, State),
@@ -676,7 +719,7 @@ decode(new_port_ext, <<?NEW_PORT_EXT, Rest/binary>>, #{ new_port_ext := Context 
     end;
 
 %---------------------------------------------------------------------
-%
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#v4_port_ext
 %---------------------------------------------------------------------
 decode(v4_port_ext, <<?V4_PORT_EXT, Rest/binary>>, #{ v4_port_ext := cursed } = Opts, State) ->
     {ok, _Node, Rest2} = decode(atom_ext, Rest, Opts#{ atoms => create }, State),
@@ -702,7 +745,7 @@ decode(v4_port_ext, <<?V4_PORT_EXT, Rest/binary>>, #{ v4_port_ext := Context } =
     end;
 
 %---------------------------------------------------------------------
-%
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#pid_ext
 %---------------------------------------------------------------------
 decode(pid_ext, <<?PID_EXT, Rest/binary>>, #{ pid_ext := cursed } = Opts, State) ->
     {ok, _Node, Rest2} = decode(atom_ext, Rest, Opts#{ atoms => create }, State),
@@ -733,6 +776,7 @@ decode(pid_ext, <<?PID_EXT, Rest/binary>>, #{ pid_ext := Context } = Opts, State
 % @todo to be tested
 % fun_ext has been removed since R23, this implementation only returns
 % the content of the fun, only in cursed mode.
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#fun_ext--removed-
 %---------------------------------------------------------------------
 % decode(fun_ext, <<?FUN_EXT, _NumFree:32/unsigned-integer, Rest/binary>>, #{ fun_ext := cursed } = Opts, State) ->
 %     {ok, Pid, RestPid} = decode(pid_ext, Rest, Opts#{ pid_ext => cursed }, #state{}),
@@ -746,7 +790,7 @@ decode(fun_ext, <<?FUN_EXT, _NumFree:32/unsigned-integer, _Rest/binary>>, #{ fun
     decode_error(Reason, Opts, State);
 
 %---------------------------------------------------------------------
-%
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#pid_ext
 %---------------------------------------------------------------------
 decode(new_pid_ext, <<?NEW_PID_EXT, Rest/binary>>
       ,#{ new_pid_ext := cursed } = Opts, State) ->
@@ -778,6 +822,7 @@ decode(new_pid_ext, <<?NEW_PID_EXT, Rest/binary>>
 
 %---------------------------------------------------------------------
 % @todo to be tested
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#reference_ext--deprecated-
 %---------------------------------------------------------------------
 % -type reference_ext() :: enabled | disabled | cursed | callback_option().
 % decode(reference_ext, <<?REFERENCE_EXT, Rest/binary>>
@@ -791,6 +836,7 @@ decode(new_pid_ext, <<?NEW_PID_EXT, Rest/binary>>
 
 %---------------------------------------------------------------------
 % @todo to be tested
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#new_reference_ext
 %---------------------------------------------------------------------
 % decode(new_reference_ext, <<?NEW_REFERENCE_EXT, Length:16/unsigned-integer, Rest/binary>>
 %       ,#{ new_reference_ext := cursed } = Opts, State) ->
@@ -825,6 +871,7 @@ decode(new_reference_ext, <<?NEW_REFERENCE_EXT, Length:16/unsigned-integer, Rest
 
 %---------------------------------------------------------------------
 % @todo to cleanup this mess
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#newer_reference_ext
 %---------------------------------------------------------------------
 % decode(newer_reference_ext, <<?NEWER_REFERENCE_EXT, Length:16/unsigned-integer, Rest/binary>>
 %       ,#{ newer_reference_ext := cursed } = Opts, State) ->
@@ -862,7 +909,7 @@ decode(newer_reference_ext, <<?NEWER_REFERENCE_EXT, Length:16/unsigned-integer, 
     end;
 
 %---------------------------------------------------------------------
-%
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#small_big_ext
 %---------------------------------------------------------------------
 decode(small_big_ext, <<?SMALL_BIG_EXT, Size:8/unsigned-integer, Sign:8/unsigned-integer, Rest/binary>>
       , #{ small_big_ext := cursed } = _Opts, _State) ->
@@ -888,7 +935,7 @@ decode(small_big_ext, <<?SMALL_BIG_EXT, Size:8/unsigned-integer, Sign:8/unsigned
     end;
 
 %---------------------------------------------------------------------
-%
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#large_tuple_ext
 %---------------------------------------------------------------------
 decode(large_big_ext, <<?LARGE_BIG_EXT, Size:32/unsigned-integer, Sign:8/unsigned-integer, Rest/binary>>
       , #{ large_big_ext := cursed } = _Opts, _State) ->
@@ -914,7 +961,7 @@ decode(large_big_ext, <<?LARGE_BIG_EXT, Size:32/unsigned-integer, Sign:8/unsigne
     end;
 
 %---------------------------------------------------------------------
-%
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#new_fun_extexport
 %---------------------------------------------------------------------
 decode(export_ext, <<?EXPORT_EXT, Rest/binary>>, #{ export_ext := enabled } = Opts, _State) ->
     ExportExtOpts = maps:get(export_ext_options, Opts, Opts),
@@ -929,7 +976,7 @@ decode(export_ext, <<?EXPORT_EXT, Rest/binary>>, #{ export_ext := enabled } = Op
     end;
 
 %---------------------------------------------------------------------
-%
+% see: https://www.erlang.org/doc/apps/erts/erl_ext_dist#new_fun_ext
 %---------------------------------------------------------------------
 decode(new_fun_ext, <<?NEW_FUN_EXT, Size:32/unsigned-integer, Rest/binary>>
       , #{ new_fun_ext := Mode } = Opts, State) ->
@@ -943,20 +990,36 @@ decode(new_fun_ext, <<?NEW_FUN_EXT, Size:32/unsigned-integer, Rest/binary>>
             Fun = ?BINARY_TO_TERM(<<131, ?NEW_FUN_EXT,  Size:32/unsigned-integer, Payload:RealSize/binary>>),
             {ok, Fun, Rest2};
         disabled ->
-            {error, [{reason, "new_fun_ext disabled"}], State}
+            Reason = [{reason, "new_fun_ext disabled"}], 
+            decode_error(Reason, Opts, State)
     end;
 
+%---------------------------------------------------------------------
+% LOCAL_EXT was introduced in R26. At this time, only callback mode
+% and raw can be used on this one.
+% see: https://www.erlang.org/doc/man/erlang#term_to_binary_local
+%---------------------------------------------------------------------
+decode(local_ext, <<?LOCAL_EXT, Rest/binary>>, #{ local_ext := Context } = Opts, State) ->
+    case Context of
+        raw ->
+            {raw, <<>>, Rest};
+        {callback, Callback} ->
+            decode_callback(Callback, <<>>, Rest, Opts, State)
+    end;
+decode(local_ext, <<?LOCAL_EXT, _Rest/binary>>, Opts, State) ->
+    Reason = [{reason, "local_ext disabled"}],
+    decode_error(Reason, Opts, State);
+        
 %---------------------------------------------------------------------
 % Wildcard Pattern
 %---------------------------------------------------------------------
 decode(Parser, Rest, Opts, State) ->
-    { error
-    , [{reason, "unsupporter parser"}
-      ,{parser, Parser}
-      ,{rest, Rest}
-      ,{opts, Opts},
-       {state, State}]
-    , State}.
+    Reason = [{reason, "unsupporter parser"}
+             ,{parser, Parser}
+             ,{rest, Rest}
+             ,{opts, Opts},
+              {state, State}],
+    decode_error(Reason, Opts, State).
 
 decode_test() ->
     [ decode_properties(integer, default_options())
