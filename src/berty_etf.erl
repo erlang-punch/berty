@@ -16,12 +16,13 @@
 %%% A term can be decoded in many different ways.
 %%%
 %%% <ul>
-%%%   <li>`enabled': use a default and safe method to decode a term</li>
-%%%   <li>`disabled': stop the parser</li>
-%%%   <li>`cursed': use `binary_to_term/2' function with `[safe]' option</li>
+%%%   <li>`enabled': use a default and safe method to decode a term;</li>
+%%%   <li>`disabled': stop the parser;</li>
+%%%   <li>`cursed': use `binary_to_term/2' function with `[safe]' option;</li>
 %%%   <li>`{callback, Callback}': use a lambda function with arity 4
-%%%       or a module/function tuple `{Module, Function}'</li>
-%%%   <li>`drop': just drop the term and do the next one</li>
+%%%       or a module/function tuple `{Module, Function}';</li>
+%%%   <li>`drop': just drop the term and do the next one;</li>
+%%%   <li>`raw': mainly for internal use, but can be used for specific usages.</li>
 %%% </ul>
 %%%
 %%% ```
@@ -29,7 +30,7 @@
 %%% Fun = fun(RawTerm, Rest, Opts, State) ->
 %%%   {ok, unsupported, Rest}
 %%% end.
-%%% 
+%%%
 %%% % use the callback function to decode small_integers
 %%% Opts = #{ small_integer_ext => {callback, Fun}.
 %%% {ok, {unsupported, unsupported}}
@@ -127,13 +128,14 @@ default_options() ->
      , map_ext => enabled
      }.
 
+-type common_options() :: enabled | disabled | cursed | drop | raw.
 -type callback_option() :: {callback, function() | {atom(), atom()}}.
 -type limit_option() :: {number(), number()}.
--type atom_ext() :: enabled | disabled | cursed | callback_option().
+-type atom_ext() :: common_options() | callback_option().
 -type atom_ext_size() :: limit_option().
--type atom_utf8_ext() ::  enabled | disabled | cursed | callback_option().
+-type atom_utf8_ext() ::  common_options() | callback_option().
 -type atom_utf8_ext_size() :: limit_option().
--type binary_ext() :: enabled | disabled | callback_option().
+-type binary_ext() :: common_options() | callback_option().
 -type binary_ext_size() :: limit_option().
 -type bit_binary_ext() :: enabled | disabled | callback_option().
 -type bit_binary_ext_size() :: limit_option().
@@ -249,10 +251,7 @@ decode(<<131, Data/binary>> = _Payload, Opts) ->
     case decode(Data, NewOpts, State) of
         {ok, Term, <<>>} -> {ok, Term};
         {next, Rest} -> decode(Rest, NewOpts, State);
-        {error, Reason, ErrorState} ->
-            decode_error(Reason, NewOpts, State);
-        Elsewise ->
-            Elsewise
+        Elsewise -> Elsewise
     end.
 
 %%--------------------------------------------------------------------
@@ -292,12 +291,14 @@ decode(small_integer_ext, <<?SMALL_INTEGER_EXT, Integer/unsigned-integer, Rest/b
     {Min, Max} = maps:get({small_integer_ext, limit}, Opts, {0,255}),
     if Integer >= Min andalso Integer =< Max ->
             case Context of
-                drop -> 
+                drop ->
                     {next, Rest};
-                {callback, Callback}  -> 
+                raw ->
+                    {raw, <<Integer/unsigned-integer>>, Rest};
+                {callback, Callback}  ->
                     RawTerm = <<?SMALL_INTEGER_EXT, Integer/unsigned-integer>>,
                     decode_callback(Callback, RawTerm, Rest, Opts, State);
-                _Elsewise -> 
+                _Elsewise ->
                     {ok, Integer, Rest}
             end;
        true ->
@@ -320,12 +321,14 @@ decode(integer_ext, <<?INTEGER_EXT, Integer:32/signed-integer, Rest/binary>>
     {Min, Max} = maps:get({small_integer_ext, limit}, Opts, {-2147483648,2147483647}),
     if Integer >= Min andalso Integer =< Max ->
             case Context of
-                drop -> 
+                drop ->
                     {next, Rest};
+                raw ->
+                    {raw, <<Integer:32/signed-integer>>, Rest};
                 {callback, Callback} ->
                     RawTerm = <<?INTEGER_EXT, Integer:32/signed-integer>>,
                     decode_callback(Callback, RawTerm, Rest, Opts, State);
-                _Elsewise -> 
+                _Elsewise ->
                     {ok, Integer, Rest}
             end;
        true ->
@@ -346,6 +349,8 @@ decode(float_ext, <<?FLOAT_EXT, Float:31/binary, Rest/binary>>
     case Context of
         drop ->
             {next, Rest};
+        raw ->
+            {raw, Float, Rest};
         {callback, Callback} ->
             RawTerm = <<?FLOAT_EXT, Float:31/binary>>,
             decode_callback(Callback, RawTerm, Rest, Opts, State);
@@ -370,6 +375,8 @@ decode(new_float_ext, <<?NEW_FLOAT_EXT, Float:8/binary, Rest/binary>>
     case Context of
         drop ->
             {next, Rest};
+        raw ->
+            {raw, Float, Rest};
         {callback, Callback} ->
             RawTerm = <<?NEW_FLOAT_EXT, Float:8/binary>>,
             decode_callback(Callback, RawTerm, Rest, Opts, State);
@@ -394,7 +401,9 @@ decode(atom_ext, <<?ATOM_EXT, Length:16/unsigned-integer, Rest/binary>>
       , #{ atom_ext := Context } = Opts, State) ->
     <<Atom:Length/binary, Rest2/binary>> = Rest,
     case Context of
-        drop -> 
+        raw ->
+            {raw, <<Length:16/unsigned-integer, Atom:Length/binary>>, Rest2};
+        drop ->
             {next, Rest2};
         {callback, Callback} ->
             RawTerm = <<?ATOM_EXT, Length:16/unsigned-integer, Atom:Length/binary>>,
@@ -423,6 +432,8 @@ decode(small_atom_ext, <<?SMALL_ATOM_EXT, Length:8/unsigned-integer, Rest/binary
     case Context of
         drop ->
             {next, Rest2};
+        raw ->
+            {raw, <<Length:8/unsigned-integer, Atom:Length/binary>>, Rest2};
         {callback, Callback} ->
             RawTerm = <<?SMALL_ATOM_EXT, Length:8/unsigned-integer, Atom:Length/binary>>,
             decode_callback(Callback, RawTerm, Rest2, Opts, State);
@@ -450,6 +461,8 @@ decode(small_atom_utf8_ext, <<?SMALL_ATOM_UTF8_EXT, Length:8/unsigned-integer, R
     case Context of
         drop ->
             {next, Rest2};
+        raw ->
+            {raw, <<Length:8/unsigned-integer, Atom:Length/binary>>, Rest2};
         {callback, Callback} ->
             RawTerm = <<?SMALL_ATOM_UTF8_EXT, Length:8/unsigned-integer, Atom:Length/binary>>,
             decode_callback(Callback, RawTerm, Rest2, Opts, State);
@@ -484,6 +497,8 @@ decode(atom_utf8_ext, <<?ATOM_UTF8_EXT, Length:16/unsigned-integer, Rest/binary>
     case Context of
         drop ->
             {next, Rest2};
+        raw ->
+            {raw, <<Length:16/unsigned-integer, Atom:Length/binary>>, Rest2};
         {callback, Callback} ->
             RawTerm = <<?ATOM_UTF8_EXT, Length:16/unsigned-integer, Atom:Length/binary>>,
             decode_callback(Callback, RawTerm, Rest2, Opts, State);
@@ -560,6 +575,9 @@ decode(binary_ext, <<?BINARY_EXT, Size:32/unsigned-integer, Rest/binary>>
     case Context of
         drop ->
             {next, Rest2};
+        raw ->
+            RawTerm = <<Size:32/unsigned-integer, Binary:Size/binary>>,
+            {raw, RawTerm, Rest2};
         {callback, Callback} ->
             RawTerm = <<?BINARY_EXT, Size:32/unsigned-integer, Binary:Size/binary>>,
             decode_callback(Callback, RawTerm, Rest2, Opts, State);
@@ -584,6 +602,10 @@ decode(bit_binary_ext, <<?BIT_BINARY_EXT, Size:32/unsigned-integer, Bits:8, Rest
     case Context of
         drop ->
             {next, Rest2};
+        raw ->
+            RawTerm = <<?BIT_BINARY_EXT, Size:32/unsigned-integer
+                       , Binary:(Size-1)/binary, Byte:1/binary>>,
+            {raw, RawTerm, Rest2};
         {callback, Callback} ->
             RawTerm = <<?BIT_BINARY_EXT, Size:32/unsigned-integer
                        , Binary:(Size-1)/binary, Byte:1/binary>>,
@@ -610,6 +632,22 @@ decode(port_ext, <<?PORT_EXT, Rest/binary>>, #{ port_ext := cursed } = Opts, Sta
     Format = io_lib:format("#Port<~B.~B>", [Creation,Id]),
     StringPort = lists:flatten(Format),
     {ok, list_to_port(StringPort), Rest3};
+decode(port_ext, <<?PORT_EXT, Rest/binary>>, #{ port_ext := Context } = Opts, State) ->
+    {raw, Node, Rest2} = decode(atom_ext, Rest, Opts#{ atom_ext => raw }, State),
+    <<Id:32/unsigned-integer, Creation:8/unsigned-integer, Rest3/binary>> = Rest2,
+    case Context of
+        drop ->
+            {next, Rest3};
+        raw ->
+            RawTerm = <<Node/binary, Id:32/unsigned-integer, Creation:8/unsigned-integer>>,
+            {raw, RawTerm, Rest3};
+        {callback, Callback} ->
+            RawTerm = <<?PORT_EXT, Node/binary, Id:32/unsigned-integer, Creation:8/unsigned-integer>>,
+            decode_callback(Callback, RawTerm, Rest3, Opts, State);
+        _ ->
+            Reason = [{reason, "port_ext disabled"}],
+            decode_error(Reason, Opts, State)
+    end;
 
 %---------------------------------------------------------------------
 %
@@ -620,6 +658,22 @@ decode(new_port_ext, <<?NEW_PORT_EXT, Rest/binary>>, #{ new_port_ext := cursed }
     Format = io_lib:format("#Port<~B.~B>", [Creation,Id]),
     StringPort = lists:flatten(Format),
     {ok, list_to_port(StringPort), Rest3};
+decode(new_port_ext, <<?NEW_PORT_EXT, Rest/binary>>, #{ new_port_ext := Context } = Opts, State) ->
+    {raw, Node, Rest2} = decode(atom_ext, Rest, Opts#{ atom_ext => raw }, State),
+    <<Id:32/unsigned-integer, Creation:32/unsigned-integer, Rest3/binary>> = Rest2,
+    case Context of
+        drop ->
+            {next, Rest3};
+        raw ->
+            RawTerm = <<Node/binary, Id:32/unsigned-integer, Creation:32/unsigned-integer>>,
+            {raw, RawTerm, Rest3};
+        {callback, Callback} ->
+            RawTerm = <<?NEW_PORT_EXT, Node/binary, Id:32/unsigned-integer, Creation:32/unsigned-integer>>,
+            decode_callback(Callback, RawTerm, Rest3, Opts, State);
+        _ ->
+            Reason = [{reason, "port_ext disabled"}],
+            decode_error(Reason, Opts, State)
+    end;
 
 %---------------------------------------------------------------------
 %
@@ -630,6 +684,22 @@ decode(v4_port_ext, <<?V4_PORT_EXT, Rest/binary>>, #{ v4_port_ext := cursed } = 
     Format = io_lib:format("#Port<~B.~B>", [Creation,Id]),
     StringPort = lists:flatten(Format),
     {ok, list_to_port(StringPort), Rest3};
+decode(v4_port_ext, <<?V4_PORT_EXT, Rest/binary>>, #{ v4_port_ext := Context } = Opts, State) ->
+    {raw, Node, Rest2} = decode(atom_ext, Rest, Opts#{ atom_ext => raw }, State),
+    <<Id:64/unsigned-integer, Creation:32/unsigned-integer, Rest3/binary>> = Rest2,
+    case Context of
+        drop ->
+            {next, Rest3};
+        raw ->
+            RawTerm = <<Node/binary, Id:64/unsigned-integer, Creation:32/unsigned-integer>>,
+            {raw, RawTerm, Rest3};
+        {callback, Callback} ->
+            RawTerm = <<?V4_PORT_EXT, Node/binary, Id:64/unsigned-integer, Creation:32/unsigned-integer>>,
+            decode_callback(Callback, RawTerm, Rest3, Opts, State);
+        _ ->
+            Reason = [{reason, "v4_port_ext disabled"}],
+            decode_error(Reason, Opts, State)
+    end;
 
 %---------------------------------------------------------------------
 %
@@ -640,6 +710,24 @@ decode(pid_ext, <<?PID_EXT, Rest/binary>>, #{ pid_ext := cursed } = Opts, State)
      ,Creation:8/unsigned-integer, Rest3/binary>> = Rest2,
     Pid = c:pid(Creation, ID, Serial),
     {ok, Pid, Rest3};
+decode(pid_ext, <<?PID_EXT, Rest/binary>>, #{ pid_ext := Context } = Opts, State) ->
+    {raw, Node, Rest2} = decode(atom_ext, Rest, Opts#{ atom_ext => raw }, State),
+    <<ID:32/unsigned-integer, Serial:32/unsigned-integer
+     ,Creation:8/unsigned-integer, Rest3/binary>> = Rest2,
+    case Context of
+        drop -> {next, Rest3};
+        raw ->
+            RawTerm = <<Node/binary, ID:32/unsigned-integer
+                       , Serial:32/unsigned-integer, Creation:8/unsigned-integer>>,
+            {raw, RawTerm, Rest3};
+        {callback, Callback} ->
+            RawTerm = <<?PID_EXT, Node/binary, ID:32/unsigned-integer
+                       , Serial:32/unsigned-integer, Creation:8/unsigned-integer>>,
+            decode_callback(Callback, RawTerm, Rest3, Opts, State);
+        _ ->
+            Reason = [{reason, "pid_ext disabled"}],
+            decode_error(Reason, Opts, State)
+    end;
 
 %---------------------------------------------------------------------
 % @todo to be tested
@@ -653,9 +741,12 @@ decode(pid_ext, <<?PID_EXT, Rest/binary>>, #{ pid_ext := cursed } = Opts, State)
 %     {ok, Uniq, RestUniq} = decode(RestIndex, Opts, #state{}),
 %     {ok, FreeVars, RestFreeVars} = decode(RestUniq, Opts#{ atoms => create }, #state{}),
 %     {ok, {fun_ext, {Pid, Module, Index, Uniq, FreeVars}, RestFreeVars}};
+decode(fun_ext, <<?FUN_EXT, _NumFree:32/unsigned-integer, _Rest/binary>>, #{ fun_ext := _Context } = Opts, State) ->
+    Reason = [{reason, "fun_ext disabled"}],
+    decode_error(Reason, Opts, State);
 
 %---------------------------------------------------------------------
-% 
+%
 %---------------------------------------------------------------------
 decode(new_pid_ext, <<?NEW_PID_EXT, Rest/binary>>
       ,#{ new_pid_ext := cursed } = Opts, State) ->
@@ -664,6 +755,26 @@ decode(new_pid_ext, <<?NEW_PID_EXT, Rest/binary>>
      ,Creation:32/unsigned-integer, Rest3/binary>> = Rest2,
     Pid = c:pid(Creation, ID, Serial),
     {ok, Pid, Rest3};
+decode(new_pid_ext, <<?NEW_PID_EXT, Rest/binary>>
+      ,#{ new_pid_ext := Context } = Opts, State) ->
+    {raw, Node, Rest2} = decode(atom_ext, Rest, Opts#{ atom_ext => raw }, State),
+    <<ID:32/unsigned-integer, Serial:32/unsigned-integer
+     ,Creation:32/unsigned-integer, Rest3/binary>> = Rest2,
+    case Context of
+        drop ->
+            {next, Rest3};
+        raw ->
+            RawTerm = <<Node/binary, ID:32/unsigned-integer, Serial:32/unsigned-integer
+                       ,Creation:32/unsigned-integer>>,
+            {raw, RawTerm, Rest3};
+        {callback, Callback} ->
+            RawTerm = <<?NEW_PID_EXT, Node/binary, ID:32/unsigned-integer
+                       , Serial:32/unsigned-integer,Creation:32/unsigned-integer>>,
+            decode_callback(Callback, RawTerm, Rest3, Opts, State);
+        _ ->
+            Reason = [{reason, "new_pid_ext disabled"}],
+            decode_error(Reason, Opts, State)
+    end;
 
 %---------------------------------------------------------------------
 % @todo to be tested
@@ -690,6 +801,27 @@ decode(new_pid_ext, <<?NEW_PID_EXT, Rest/binary>>
 %     Format = io_lib:format("#Ref<~B.~B.~B.~B>", [Creation|IDSeq]),
 %     RefString = lists:flatten(Format),
 %     {ok, list_to_ref(RefString), Rest4};
+decode(new_reference_ext, <<?NEW_REFERENCE_EXT, Length:16/unsigned-integer, Rest/binary>>
+      ,#{ new_reference_ext := Context } = Opts, State) ->
+    {raw, Node, Rest2} = decode(atom_ext, Rest, Opts#{ atom_ext => raw }, State),
+    <<Creation:8/unsigned-integer, Rest3/binary>> = Rest2,
+    <<IDs:(4*Length)/binary, Rest4/binary>> = Rest3,
+    case Context of
+        drop ->
+            {next, Rest4};
+        raw ->
+            RawTerm = <<Length:16/unsigned-integer, Node/binary
+                       ,Creation:8/unsigned-integer, IDs:(4*Length)/binary>>,
+            {raw, RawTerm, Rest4};
+        enabled ->
+            IDSeq = lists:reverse([ ID || <<ID:32/unsigned-integer>> <= IDs ]),
+            Format = io_lib:format("#Ref<~B.~B.~B.~B>", [Creation|IDSeq]),
+            RefString = lists:flatten(Format),
+            {ok, list_to_ref(RefString), Rest4};
+        _ ->
+            Reason = [{reason, "new_reference_ext disabled"}],
+            decode_error(Reason, Opts, State)
+    end;
 
 %---------------------------------------------------------------------
 % @todo to cleanup this mess
@@ -703,6 +835,31 @@ decode(new_pid_ext, <<?NEW_PID_EXT, Rest/binary>>
 %     Format = io_lib:format("#Ref<~B.~B.~B.~B>", [Creation|IDSeq]),
 %     RefString = lists:flatten(Format),
 %     {ok, list_to_ref(RefString), Rest4};
+decode(newer_reference_ext, <<?NEWER_REFERENCE_EXT, Length:16/unsigned-integer, Rest/binary>>
+      ,#{ newer_reference_ext := Context } = Opts, State) ->
+    {raw, Node, Rest2} = decode(atom_ext, Rest, Opts#{ atom_ext => raw }, State),
+    <<Creation:32/unsigned-integer, Rest3/binary>> = Rest2,
+    <<IDs:(4*Length)/binary, Rest4/binary>> = Rest3,
+    case Context of
+        drop -> {next, Rest4};
+        raw ->
+            RawTerm = <<Node/binary, Creation:32/unsigned-integer
+                       ,IDs:(4*Length)/binary>>,
+            {raw, RawTerm, Rest4};
+        {callback, Callback} ->
+            RawTerm = <<?NEWER_REFERENCE_EXT, Node/binary
+                       , Creation:32/unsigned-integer
+                       , IDs:(4*Length)/binary>>,
+            decode_callback(Callback, RawTerm, Rest4, Opts, State);
+        enabled ->
+            IDSeq = lists:reverse([ ID || <<ID:32/unsigned-integer>> <= IDs ]),
+            Format = io_lib:format("#Ref<~B.~B.~B.~B>", [Creation|IDSeq]),
+            RefString = lists:flatten(Format),
+            {ok, list_to_ref(RefString), Rest4};
+        _ ->
+            Reason = [{reason, "newer_reference_ext disabled"}],
+            decode_error(Reason, Opts, State)
+    end;
 
 %---------------------------------------------------------------------
 %
@@ -713,6 +870,22 @@ decode(small_big_ext, <<?SMALL_BIG_EXT, Size:8/unsigned-integer, Sign:8/unsigned
     Bignum = ?BINARY_TO_TERM(<<131, ?SMALL_BIG_EXT, Size:8/unsigned-integer
                               ,Sign:8/unsigned-integer, Value:Size/binary>>),
     {ok, Bignum, Rest2};
+decode(small_big_ext, <<?SMALL_BIG_EXT, Size:8/unsigned-integer, Sign:8/unsigned-integer, Rest/binary>>
+      , #{ small_big_ext := Context } = Opts, State) ->
+    <<Value:Size/binary, Rest2/binary>> = Rest,
+    case Context of
+        drop ->
+            {next, Rest2};
+        raw ->
+            RawTerm = <<Size:8/unsigned-integer, Sign:8/unsigned-integer, Value:Size/binary>>,
+            {raw, RawTerm, Rest2};
+        {callback, Callback} ->
+            RawTerm = <<?SMALL_BIG_EXT, Size:8/unsigned-integer, Sign:8/unsigned-integer, Value:Size/binary>>,
+            decode_callback(Callback, RawTerm, Rest2, Opts, State);
+        _ ->
+            Reason = [{reason, "small_big_ext disabled"}],
+            decode_error(Reason, Opts, State)
+    end;
 
 %---------------------------------------------------------------------
 %
@@ -723,6 +896,22 @@ decode(large_big_ext, <<?LARGE_BIG_EXT, Size:32/unsigned-integer, Sign:8/unsigne
     Bignum = ?BINARY_TO_TERM(<<131, ?LARGE_BIG_EXT, Size:32/unsigned-integer
                               ,Sign:8/unsigned-integer, Value:Size/binary>>),
     {ok, Bignum, Rest2};
+decode(large_big_ext, <<?LARGE_BIG_EXT, Size:32/unsigned-integer, Sign:8/unsigned-integer, Rest/binary>>
+      , #{ large_big_ext := Context } = Opts, State) ->
+    <<Value:Size/binary, Rest2/binary>> = Rest,
+    case Context of
+        drop ->
+            {next, Rest2};
+        raw ->
+            RawTerm = <<Size:32/unsigned-integer, Sign:8/unsigned-integer, Value:Size/binary>>,
+            {raw, RawTerm, Rest2};
+        {callback, Callback} ->
+            RawTerm = <<?LARGE_BIG_EXT, Size:32/unsigned-integer, Sign:8/unsigned-integer, Value:Size/binary>>,
+            decode_callback(Callback, RawTerm, Rest2, Opts, State);
+        _ ->
+            Reason = [{reason, "large_big_ext disabled"}],
+            decode_error(Reason, Opts, State)
+    end;
 
 %---------------------------------------------------------------------
 %
@@ -740,7 +929,7 @@ decode(export_ext, <<?EXPORT_EXT, Rest/binary>>, #{ export_ext := enabled } = Op
     end;
 
 %---------------------------------------------------------------------
-% 
+%
 %---------------------------------------------------------------------
 decode(new_fun_ext, <<?NEW_FUN_EXT, Size:32/unsigned-integer, Rest/binary>>
       , #{ new_fun_ext := Mode } = Opts, State) ->
@@ -750,7 +939,7 @@ decode(new_fun_ext, <<?NEW_FUN_EXT, Size:32/unsigned-integer, Rest/binary>>
         {callback, Callback} ->
             RawTerm = <<?NEW_FUN_EXT, Size:32/unsigned-integer, Payload:RealSize/binary>>,
             decode_callback(Callback, RawTerm, Rest2, Opts, State);
-        cursed -> 
+        cursed ->
             Fun = ?BINARY_TO_TERM(<<131, ?NEW_FUN_EXT,  Size:32/unsigned-integer, Payload:RealSize/binary>>),
             {ok, Fun, Rest2};
         disabled ->
@@ -789,7 +978,7 @@ property_check(Term, Opts) ->
     property_check('=:=', Term, Opts).
 
 property_check(Operator, Term, Opts) ->
-    erlang:Operator({ok, Term}, decode(term_to_binary(Term), Opts)).    
+    erlang:Operator({ok, Term}, decode(term_to_binary(Term), Opts)).
 
 %%--------------------------------------------------------------------
 %% @hidden
@@ -920,7 +1109,7 @@ decode_tuple_ext(0, Rest, _Opts, _State, Buffer) ->
     {ok, list_to_tuple(lists:reverse(Buffer)), Rest};
 decode_tuple_ext(Arity, Rest, Opts, State, Buffer) ->
     case decode(Rest, Opts, #state{}) of
-        {ok, Term, Rest2} -> 
+        {ok, Term, Rest2} ->
             decode_tuple_ext(Arity-1, Rest2, Opts, State, [Term|Buffer]);
         Elsewise -> Elsewise
     end.
@@ -983,7 +1172,6 @@ decode_map_ext(Arity, Rest, Opts, State, Buffer) ->
     {ok, Value, RestValue} = decode(RestKey, Opts, #state{}),
     decode_map_ext(Arity-1, RestValue, Opts, State, Buffer#{ Key => Value }).
 
-
 %%--------------------------------------------------------------------
 %% @hidden
 %% @doc This function is used to deal with callback
@@ -991,7 +1179,7 @@ decode_map_ext(Arity, Rest, Opts, State, Buffer) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec decode_callback(Callback, RawTerm, Rest, Opts, State) -> Return when
-      Callback :: function() 
+      Callback :: function()
                 | {Module, Function},
       Module :: atom(),
       Function :: atom(),
@@ -1007,21 +1195,20 @@ decode_map_ext(Arity, Rest, Opts, State, Buffer) ->
 decode_callback(Callback, RawTerm, Rest, Opts, State)
   when is_function(Callback) ->
     apply(Callback, [RawTerm, Rest, Opts, State]);
-decode_callback({Module, Function}, RawTerm, Rest, Opts, State) 
+decode_callback({Module, Function}, RawTerm, Rest, Opts, State)
   when is_atom(Module) andalso is_atom(Function) ->
     apply(Module, Function, [RawTerm, Rest, Opts, State]).
 
 %%--------------------------------------------------------------------
-%%
+%% @hidden
+%% @doc
+%% @end
 %%--------------------------------------------------------------------
-decode_error(Reason, #{ errors := Error } = _Opts, State) ->
+decode_error(Reason, Opts, State) ->
+    Error = maps:get(errors, Opts, undefined),
     Message = {error, Reason, State},
     ?LOG_ERROR("~p", [Message]),
     case Error of
-        _ ->
-            Message
+        throw -> throw(Error);
+        _ -> Message
     end.
-
-
-    
-    
