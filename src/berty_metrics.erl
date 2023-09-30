@@ -69,7 +69,7 @@ push(Data) ->
     gen_statem:cast(?MODULE, {push, Data}).
 
 init(Args) ->
-    State = ets:new(?MODULE, []),
+    State = ets:new(?MODULE, [private]),
     {ok, State}.
 
 handle_call(Message, From, State) ->
@@ -85,10 +85,28 @@ handle_call(Message, From, State) ->
 %%
 %% @end
 %%--------------------------------------------------------------------
-handle_cast(Message, State) ->
+handle_cast({push, {Key, Value}}, State) ->
+    insert(Key, Value, State),
     {noreply, State}.
 
 handle_info(Messgae, State) ->
     {noreply, State}.
 
+insert({atom_cache_ref, count}, Value, State) ->
+    ets:insert(State, {{atom_cache_ref, count}, Value}).
 
+
+increment({Key, count}, State) ->
+    case ets:select(State, {Key, count}) of
+        [Counter] ->
+            ets:insert(State, {Key, count}, Counter+1);
+        [] -> 
+            ets:insert(State, {Key, count}, 1)
+    end.
+
+
+select(State, Key) ->
+    case ets:select(State, Key) of
+        [Value] -> {ok, Value};
+        [] -> {error, undefined}
+    end.
