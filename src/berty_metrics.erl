@@ -68,11 +68,11 @@ start_link() ->
 push(Data) ->
     gen_statem:cast(?MODULE, {push, Data}).
 
-init(Args) ->
+init(_Args) ->
     State = ets:new(?MODULE, []),
     {ok, State}.
 
-handle_call(Message, From, State) ->
+handle_call(_Message, _From, State) ->
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -85,10 +85,10 @@ handle_call(Message, From, State) ->
 %%
 %% @end
 %%--------------------------------------------------------------------
-handle_cast(Message, State) ->
+handle_cast(_Message, State) ->
     {noreply, State}.
 
-handle_info(Messgae, State) ->
+handle_info(_Messgae, State) ->
     {noreply, State}.
 
 
